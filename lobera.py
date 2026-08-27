@@ -4,15 +4,16 @@
 import argparse
 import sys
 
+from modules.rpc import RPCModule
 from core.session_db import init_db, get_targets, get_findings, get_credentials, delete_target
 from core.target import Target
 from core.credentials import Creds
 from core.output import console, print_table
 from core import auth
-from modules.smb import SMBModule
-from modules.smb_shell import SMBShell
+from scripts import loader as scripts_loader
 from utils.banner import show_banner
 from rich.table import Table
+from rich.tree import Tree
 
 
 # ============================================================
@@ -77,49 +78,36 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="module", metavar="módulo")
 
     # ============================================================
-    # Módulo: smb
     # ============================================================
-    smb_parser = subparsers.add_parser("smb", help="Enumeración y ataques SMB")
-    smb_subparsers = smb_parser.add_subparsers(dest="smb_action", metavar="acción")
-
-    # --- smb enum ---
-    enum_parser = smb_subparsers.add_parser("enum", help="Enumeración: shares, signing, null session")
-    add_common_target_args(enum_parser)
-    enum_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
-    enum_parser.add_argument("--smb-version", choices=["v1", "v2", "v2.1", "v3"], default=None,
-                              help="Fuerza una versión de SMB (por defecto: negociación automática)")
-    enum_parser.add_argument("--shares", action="store_true", help="Lista los shares disponibles")
-    enum_parser.add_argument("--signing", action="store_true", help="Comprueba si el objetivo exige SMB signing")
-    enum_parser.add_argument("--null-sess", action="store_true",
-                              help="Comprueba si el objetivo permite SMB null session")
-
-    # --- smb spider ---
-    spider_parser = smb_subparsers.add_parser("spider", help="Rastrea shares y descarga ficheros interesantes")
-    add_common_target_args(spider_parser)
-    spider_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
-    spider_parser.add_argument("--share", metavar="SHARE", default=None,
-                                help="Share concreto a rastrear. Si se omite, rastrea TODOS los shares no especiales")
-    spider_parser.add_argument("--ext", default=None,
-                                help="Extensiones a buscar, separadas por coma (ej: .txt,.kdbx). "
-                                     "Vacío ('') = sin filtro de extensión. Si no se indica, usa las de por defecto.")
-    spider_parser.add_argument("--keywords", default=None,
-                                help="Palabras clave a buscar en nombres de fichero, separadas por coma")
-    spider_parser.add_argument("--depth", type=int, default=5,
-                                help="Profundidad máxima de recursión (default: 5)")
-
-    # --- smb spray ---
-    spray_parser = smb_subparsers.add_parser("spray", help="Password spraying contra una lista de usuarios")
-    add_common_target_args(spray_parser)
-    spray_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
-    spray_parser.add_argument("--userlist", default=None, metavar="FILE",
-                               help="Fichero con una lista de usuarios, uno por línea (obligatorio salvo con --example)")
-
-    # --- smb shell ---
-    shell_parser = smb_subparsers.add_parser("shell", help="Abre una consola interactiva SMB")
-    add_common_target_args(shell_parser)
-    shell_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
-
+    # Módulo: smb (protocolo -> scripts por familia, sin subcomandos)
     # ============================================================
+    smb_parser = subparsers.add_parser(
+        "smb",
+        help="SMB: sin argumentos lista familias/scripts; usa --script o --script-fam para ejecutar"
+    )
+    add_common_target_args(smb_parser)
+    smb_parser.add_argument("--script", default=None,
+                             help="Ejecuta un script concreto por su nombre (ver 'lobera.py smb')")
+    smb_parser.add_argument("--script-fam", default=None, metavar="FAM1/FAM2",
+                             help="Ejecuta TODOS los scripts de una o varias familias, separadas por '/' "
+                                  "(ver 'lobera.py smb')")
+    smb_parser.add_argument("--example", action="store_true",
+                             help="Muestra ejemplos de uso del script indicado en --script "
+                                  "(o de cada script de --script-fam)")
+    # Flags específicos de scripts concretos. Ya no hay subparser por acción,
+    # así que se declaran todos aquí (opcionales) y cada script coge de
+    # kwargs solo los que necesita, ignorando el resto.
+    smb_parser.add_argument("--share", metavar="SHARE", default=None,
+                             help="[spider] Share concreto a rastrear. Si se omite, rastrea todos los no especiales")
+    smb_parser.add_argument("--ext", default=None,
+                             help="[spider] Extensiones a buscar, separadas por coma. Vacío ('') = sin filtro")
+    smb_parser.add_argument("--keywords", default=None,
+                             help="[spider] Palabras clave a buscar en nombres de fichero, separadas por coma")
+    smb_parser.add_argument("--depth", type=int, default=5,
+                             help="[spider] Profundidad máxima de recursión (default: 5)")
+    smb_parser.add_argument("--userlist", default=None, metavar="FILE",
+                             help="[password-spray] Fichero con un usuario por línea")
+
     # Módulo: db (consulta de la base de datos de sesión)
     # ============================================================
     db_parser = subparsers.add_parser("db", help="Consulta la base de datos de sesión (objetivos, credenciales, hallazgos)")
@@ -155,64 +143,45 @@ def build_parser():
                                    help="Salta la confirmación interactiva (para uso en scripts)")
     db_delete_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
 
+    # ============================================================
+    # Módulo: rpc
+    # ============================================================
+    rpc_parser = subparsers.add_parser("rpc", help="Enumeración RPC (SAMR/LSARPC sobre IPC$)")
+    rpc_subparsers = rpc_parser.add_subparsers(dest="rpc_action", metavar="acción")
+
+    # --- rpc enum ---
+    rpc_enum_parser = rpc_subparsers.add_parser("enum", help="Enumeración vía SAMR: dominios, usuarios, grupos, política de contraseñas")
+    add_common_target_args(rpc_enum_parser)
+    rpc_enum_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
+    rpc_enum_parser.add_argument("--domains", action="store_true", help="Lista los dominios SAM visibles en el servidor")
+    rpc_enum_parser.add_argument("--users", action="store_true", help="Enumera los usuarios del dominio (SamrEnumerateUsersInDomain)")
+    rpc_enum_parser.add_argument("--groups", action="store_true", help="Enumera los grupos del dominio (SamrEnumerateGroupsInDomain)")
+    rpc_enum_parser.add_argument("--policy", action="store_true", help="Consulta política de contraseñas y bloqueo de cuenta del dominio")
+    rpc_enum_parser.add_argument("--domain-name", default=None, metavar="DOM",
+                                  help="Dominio SAM sobre el que enumerar (por defecto: se autodetecta el primero no-Builtin)")
+
+    # --- rpc lookup ---
+    rpc_lookup_parser = rpc_subparsers.add_parser("lookup", help="Resolución de SIDs<->nombres vía LSARPC")
+    add_common_target_args(rpc_lookup_parser)
+    rpc_lookup_parser.add_argument("--example", action="store_true", help="Muestra ejemplos de uso y sale")
+    rpc_lookup_parser.add_argument("--sid", action="store_true",
+                                    help="Muestra el SID del dominio (LSA PolicyAccountDomainInformation)")
+    rpc_lookup_parser.add_argument("--names", default=None, metavar="LISTA",
+                                    help="Nombres a resolver a SID, separados por coma (ej: Administrator,jsmith)")
+    rpc_lookup_parser.add_argument("--sids", default=None, metavar="LISTA",
+                                    help="SIDs a resolver a nombre, separados por coma")
+
+    # ============================================================
     return parser
 
 
 # ============================================================
-# Ejemplos (--example) — uno por cada acción/flag disponible
+# Ejemplos (--example) — smb ahora se autodocumenta por script
+# (ver atributo `examples` en cada clase de scripts/smb/<familia>/).
+# db y rpc siguen el modelo anterior por ahora (no migrados en esta fase).
 # ============================================================
 
 EXAMPLES = {
-    "smb": {
-        "enum": [
-            {"flag": "--shares",
-             "desc": "Lista los shares disponibles (requiere login previo)",
-             "good": "smb enum -t 10.129.1.5 -u iker --shares",
-             "bad": "smb enum -t 10.129.1.5 --shares  [sin -u, hara null session -> puede dar Access Denied]"},
-            {"flag": "--signing",
-             "desc": "Chequeo de solo lectura, no requiere credenciales",
-             "good": "smb enum -t 10.129.1.5 --signing",
-             "bad": "smb enum -t 10.129.1.5 -u iker -p 'Pass123!' --signing  [credenciales innecesarias, mas ruido en logs]"},
-            {"flag": "--null-sess",
-             "desc": "Comprueba null session sin usar tus credenciales reales",
-             "good": "smb enum -t 10.129.1.5 --null-sess",
-             "bad": "smb enum -t 10.129.1.5 -u admin -p 'RealPass!' --null-sess  [null-sess ignora -u/-p, son redundantes aqui]"},
-            {"flag": "--smb-version",
-             "desc": "Fuerza un dialecto concreto en vez de negociacion automatica",
-             "good": "smb enum -t 10.129.1.5 --smb-version v1  [para detectar si SMBv1 legacy esta activo]",
-             "bad": "smb enum -t 10.129.1.5 --smb-version v3  [si el objetivo no soporta v3, falla en vez de negociar]"},
-        ],
-        "spider": [
-            {"flag": "--share",
-             "desc": "Restringe el rastreo a un unico share",
-             "good": "smb spider -t 10.129.1.5 -u iker --share Users",
-             "bad": "smb spider -t 10.129.1.5 -u iker --share ADMIN$  [shares especiales rara vez tienen contenido de usuario]"},
-            {"flag": "--ext",
-             "desc": "Filtra por extension; vacio = sin filtro (todo)",
-             "good": "smb spider -t 10.129.1.5 -u iker --ext .kdbx,.txt",
-             "bad": "smb spider -t 10.129.1.5 -u iker --ext ''  [descarga TODO, puede tardar mucho y llenar disco]"},
-            {"flag": "--keywords",
-             "desc": "Busca coincidencias por nombre, ademas de por extension",
-             "good": "smb spider -t 10.129.1.5 -u iker --keywords password,backup",
-             "bad": "smb spider -t 10.129.1.5 -u iker --keywords a,e,i  [keywords tan cortas generan falsos positivos masivos]"},
-            {"flag": "--depth",
-             "desc": "Profundidad de recursion en subcarpetas",
-             "good": "smb spider -t 10.129.1.5 -u iker --depth 3  [suficiente para perfiles de usuario tipicos]",
-             "bad": "smb spider -t 10.129.1.5 -u iker --depth 20  [en C$ puede tardar muchisimo]"},
-        ],
-        "spray": [
-            {"flag": "--userlist",
-             "desc": "Fichero con un usuario por linea",
-             "good": "smb spray -t 10.129.1.5 --userlist users.txt -p 'Summer2024!'",
-             "bad": "smb spray -t 10.129.1.5 --userlist users.txt -p ''  [contrasena vacia casi nunca es util en spray real]"},
-        ],
-        "shell": [
-            {"flag": "(sin flags extra)",
-             "desc": "Abre la consola interactiva tras login",
-             "good": "smb shell -t 10.129.1.5 -u iker -p 'Summer2024!'",
-             "bad": "smb shell -t 10.129.1.5  [sin -u, entraras con null session y la mayoria de comandos fallaran]"},
-        ],
-    },
     "db": {
         "targets": [
             {"flag": "(sin flags)",
@@ -221,8 +190,8 @@ EXAMPLES = {
              "bad": "db targets -t 10.129.1.5  [-t no existe en 'targets', esta accion lista TODOS, no filtra por uno]"},
         ],
         "findings": [
-            {"flag": "-t",
-             "desc": "Filtra hallazgos por objetivo (obligatorio)",
+            {"flag": "-t / --target",
+             "desc": "Filtra hallazgos por objetivo (obligatorio salvo con --example)",
              "good": "db findings -t 10.129.1.5",
              "bad": "db findings  [sin -t, no sabe de que objetivo mostrar hallazgos]"},
             {"flag": "--protocol",
@@ -231,6 +200,10 @@ EXAMPLES = {
              "bad": "db findings -t 10.129.1.5 --protocol smb  [minusculas: el filtro no encontrara 'SMB' guardado en mayusculas]"},
         ],
         "creds": [
+            {"flag": "-t / --target",
+             "desc": "Filtra credenciales por objetivo (obligatorio salvo con --example)",
+             "good": "db creds -t 10.129.1.5",
+             "bad": "db creds  [sin -t, no sabe de que objetivo mostrar credenciales]"},
             {"flag": "--all",
              "desc": "Incluye credenciales invalidas, no solo las que funcionaron",
              "good": "db creds -t 10.129.1.5 --all  [util para ver tambien intentos fallidos de spray]",
@@ -241,7 +214,7 @@ EXAMPLES = {
              "bad": "db creds -t 10.129.1.5 --show-secret  [en una sesion compartida/grabada -> expone credenciales reales]"},
         ],
         "delete": [
-            {"flag": "-t",
+            {"flag": "-t / --target",
              "desc": "Borra TODO lo guardado (targets, credenciales, findings, log) de ese objetivo",
              "good": "db delete -t 10.129.1.5  [pide confirmacion antes de borrar]",
              "bad": "db delete -t 10.129.1.5 --yes  [salta confirmacion sin haber revisado antes que datos hay guardados]"},
@@ -249,6 +222,92 @@ EXAMPLES = {
              "desc": "Salta la confirmacion interactiva",
              "good": "db delete -t 10.129.1.5 --yes  [en un script automatizado de limpieza tras cada engagement]",
              "bad": "db delete -t 10.129.1.5 --yes  [en uso manual normal: te arriesgas a borrar el objetivo equivocado sin darte cuenta]"},
+        ],
+    },
+    "rpc": {
+        "enum": [
+            {"flag": "-t / --target",
+             "desc": "IP o hostname del objetivo (obligatorio salvo con --example)",
+             "good": "rpc enum -t 10.129.1.5 --domains",
+             "bad": "rpc enum --domains  [sin -t, falla: es obligatorio salvo con --example]"},
+            {"flag": "-u / --user",
+             "desc": "Usuario para autenticar el pipe MSRPC. Vacío = intenta null session",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --users",
+             "bad": "rpc enum -t 10.129.1.5 --users  [sin -u, muchos DC actuales deniegan SAMR anónimo -> falla]"},
+            {"flag": "-p / --password",
+             "desc": "Contraseña en texto claro (junto a -u)",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --users",
+             "bad": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c --users  [-p y -H juntos: usa solo uno]"},
+            {"flag": "-H / --hash",
+             "desc": "Pass-the-hash (formato NT o LM:NT) en vez de contraseña",
+             "good": "rpc enum -t 10.129.1.5 -u administrator -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c --users",
+             "bad": "rpc enum -t 10.129.1.5 -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c --users  [sin -u, Lobera no sabe qué usuario autenticar con ese hash]"},
+            {"flag": "-d / --domain",
+             "desc": "Dominio NetBIOS corto para autenticación NTLM del pipe (NO es el dominio SAM a enumerar, ver --domain-name)",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' -d CORP --users",
+             "bad": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' -d corp.local --users  [FQDN completo en vez de NetBIOS corto: puede dar falso fallo de login]"},
+            {"flag": "--timeout",
+             "desc": "Timeout de conexión en segundos (default: 5)",
+             "good": "rpc enum -t 10.129.1.5 --timeout 10 --domains  [red lenta o VPN de HTB]",
+             "bad": "rpc enum -t 10.129.1.5 --timeout 0 --domains  [0 puede provocar fallo inmediato en vez de esperar la conexión]"},
+            {"flag": "--domains",
+             "desc": "Lista los dominios SAM visibles (Builtin + dominio real si aplica)",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --domains",
+             "bad": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --domains --domain-name CORP  [--domain-name no aplica a --domains, que siempre lista TODOS]"},
+            {"flag": "--users",
+             "desc": "Enumera usuarios del dominio (requiere que SAMR no esté restringido, ver RestrictAnonymous)",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --users",
+             "bad": "rpc enum -t 10.129.1.5 --users  [sin credenciales, muy probable Access Denied en DCs modernos]"},
+            {"flag": "--groups",
+             "desc": "Enumera grupos del dominio",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --groups",
+             "bad": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --domains --groups --domain-name Builtin  [enumerar grupos de Builtin rara vez es útil, casi siempre se quiere el dominio real]"},
+            {"flag": "--policy",
+             "desc": "Política de contraseñas y bloqueo de cuenta (min length, historial, lockout...)",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --policy  [útil ANTES de un password spray, para no bloquear cuentas]",
+             "bad": "rpc enum -t 10.129.1.5 --policy  [sin credenciales puede fallar en DCs que exigen auth para SAMR]"},
+            {"flag": "--domain-name",
+             "desc": "Fuerza el dominio SAM sobre el que enumerar usuarios/grupos/política. Por defecto se autodetecta el primero no-Builtin",
+             "good": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --users --domain-name CORP",
+             "bad": "rpc enum -t 10.129.1.5 -u jsmith -p 'Pass123!' --users --domain-name corp.local  [debe ser el nombre NetBIOS SAM, no el FQDN]"},
+        ],
+        "lookup": [
+            {"flag": "-t / --target",
+             "desc": "IP o hostname del objetivo (obligatorio salvo con --example)",
+             "good": "rpc lookup -t 10.129.1.5 --sid",
+             "bad": "rpc lookup --sid  [sin -t, falla: es obligatorio salvo con --example]"},
+            {"flag": "-u / --user",
+             "desc": "Usuario para autenticar el pipe MSRPC. Vacío = intenta null session",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --names administrator",
+             "bad": "rpc lookup -t 10.129.1.5 --names administrator  [sin -u, muchos DC deniegan LSA lookup anónimo]"},
+            {"flag": "-p / --password",
+             "desc": "Contraseña en texto claro (junto a -u)",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --sid",
+             "bad": "rpc lookup -t 10.129.1.5 -u jsmith --sid  [sin -p, login con contraseña vacía probablemente falle]"},
+            {"flag": "-H / --hash",
+             "desc": "Pass-the-hash (formato NT o LM:NT) en vez de contraseña",
+             "good": "rpc lookup -t 10.129.1.5 -u administrator -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c --sid",
+             "bad": "rpc lookup -t 10.129.1.5 -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c --sid  [sin -u, Lobera no sabe qué usuario autenticar con ese hash]"},
+            {"flag": "-d / --domain",
+             "desc": "Dominio NetBIOS corto para autenticación NTLM del pipe",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' -d CORP --sid",
+             "bad": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' -d corp.local --sid  [FQDN completo en vez de NetBIOS corto: puede dar falso fallo de login]"},
+            {"flag": "--timeout",
+             "desc": "Timeout de conexión en segundos (default: 5)",
+             "good": "rpc lookup -t 10.129.1.5 --timeout 10 --sid",
+             "bad": "rpc lookup -t 10.129.1.5 --timeout 0 --sid  [0 puede provocar fallo inmediato en vez de esperar la conexión]"},
+            {"flag": "--sid",
+             "desc": "Muestra el SID del dominio, útil como base para construir SIDs de usuario a mano (S-1-5-21-...-RID) o para RID cycling",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --sid",
+             "bad": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --sid --names administrator  [mezclar --sid con --names es válido pero rara vez necesario, --sid ya da la base para construir SIDs a mano]"},
+            {"flag": "--names",
+             "desc": "Resuelve nombre(s) de usuario/grupo a SID(s)",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --names administrator,jsmith",
+             "bad": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --names 'CORP\\administrator con espacios'  [nombres con espacios sin comillas internas correctas pueden partirse mal en el CSV]"},
+            {"flag": "--sids",
+             "desc": "Resuelve SID(s) a nombre(s). Combínalo con --sid para construir SIDs de RID conocidos (500=Administrator, 501=Guest...)",
+             "good": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --sids S-1-5-21-1111-2222-3333-500",
+             "bad": "rpc lookup -t 10.129.1.5 -u jsmith -p 'Pass123!' --sids 500  [500 es solo el RID, no un SID completo: falla al parsear]"},
         ],
     },
 }
@@ -273,115 +332,231 @@ def show_examples(module, action):
 
 
 # ============================================================
-# Acciones: smb
+# ============================================================
+# Acciones: smb (protocolo -> scripts por familia)
 # ============================================================
 
-def run_smb_enum(args):
-    if not require_target(args):
-        return
+def _build_target_creds(args):
     target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
     creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
-    smb = SMBModule(target, creds)
+    return target, creds
 
-    if not smb.connect(force_dialect=args.smb_version):
+
+def build_script_kwargs(args):
+    """Flags específicos de scripts (declarados a nivel de protocolo) que se
+    reenvían tal cual a script.run(**kwargs). Cada script coge lo suyo e
+    ignora el resto."""
+    return {
+        "share": args.share,
+        "ext": args.ext,
+        "keywords": args.keywords,
+        "depth": args.depth,
+        "userlist": args.userlist,
+    }
+
+
+def print_protocol_tree(protocol):
+    """Árbol de familias -> scripts de un protocolo. Se muestra cuando el
+    protocolo se invoca sin --script ni --script-fam."""
+    tree_data = scripts_loader.get_tree(protocol)
+    if not tree_data:
+        console.print(f"[yellow]No hay scripts cargados todavia para el protocolo '{protocol}'.[/yellow]")
+        console.print(f"Añade alguno en scripts/{protocol}/<familia>/ (ver scripts/base.py).")
         return
 
-    if args.signing:
-        smb.check_signing()
+    tree = Tree(f"[bold cyan]{protocol}[/bold cyan]")
+    for category, scripts_in_cat in tree_data.items():
+        branch = tree.add(f"[bold yellow]{category}[/bold yellow]")
+        for name, description in scripts_in_cat:
+            branch.add(f"[bold]{name}[/bold] — {description}")
 
-    if args.null_sess:
-        smb.is_null_session()
+    console.print(tree)
+    console.print(f"\n[dim]Uso: lobera.py {protocol} --script=<nombre> | "
+                   f"--script-fam=<familia1/familia2> -t <target> ...[/dim]")
+    console.print(f"[dim]Flags comunes a todos los scripts: -t/-u/-p/-H/-d/--timeout. "
+                   f"Detalle de un script: lobera.py {protocol} --script=<nombre> --example[/dim]")
 
-    if args.shares:
-        if smb.login():
-            smb.list_shares()
 
-
-def run_smb_spider(args):
-    if not require_target(args):
-        return
-    target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
-    creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
-    smb = SMBModule(target, creds)
-
-    if not smb.connect():
-        return
-    if not smb.login():
+def show_script_example(protocol, name):
+    registry = scripts_loader.discover_scripts(protocol=protocol)
+    script_cls = registry.get(name)
+    if script_cls is None:
+        console.print(f"[red]No existe ningun script '{name}' en el protocolo '{protocol}'.[/red]")
         return
 
-    extensions = parse_csv(args.ext)
-    keywords = parse_csv(args.keywords)
-    kwargs = {"max_depth": args.depth, "keywords": keywords}
-    if extensions is not None:
-        kwargs["extensions"] = extensions
+    console.print(f"\n[bold cyan]{name}[/bold cyan] ({script_cls.category}) — {script_cls.description}")
 
-    if args.share:
-        smb.spider_share(args.share, **kwargs)
-    else:
-        smb.spider_all_shares(**kwargs)
-
-
-def run_smb_spray(args):
-    if not require_target(args):
-        return
-    target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
-    creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
-    smb = SMBModule(target, creds)
-
-    if not smb.connect():
+    if not script_cls.examples:
+        console.print("[dim]Este script no tiene ejemplos adicionales registrados; "
+                       "usa los flags comunes -t/-u/-p/-H/-d/--timeout.[/dim]")
         return
 
-    if not args.userlist:
-        console.print("[red]Falta --userlist (obligatorio salvo con --example).[/red]")
+    table = Table(title=f"Ejemplos — {protocol} --script={name}")
+    table.add_column("Parametro", style="cyan")
+    table.add_column("Que hace")
+    table.add_column("[green]Buen uso[/green]")
+    table.add_column("[red]Mal uso[/red]")
+    for ex in script_cls.examples:
+        table.add_row(ex["flag"], ex["desc"], ex["good"], ex["bad"])
+    console.print(table)
+
+
+def run_single_script(protocol, name, target, creds, kwargs):
+    registry = scripts_loader.discover_scripts(protocol=protocol)
+    script_cls = registry.get(name)
+    if script_cls is None:
+        console.print(f"[red]No existe ningun script '{name}' en el protocolo '{protocol}'. "
+                       f"Usa 'lobera.py {protocol}' para ver los disponibles.[/red]")
         return
 
-    try:
-        with open(args.userlist) as f:
-            users = [line.strip() for line in f if line.strip()]
-    except OSError as e:
-        console.print(f"[red]No se pudo leer {args.userlist}: {e}[/red]")
+    script = script_cls(target, creds)
+    console.print(f"[cyan]Ejecutando script '{name}' ({script_cls.category})...[/cyan]\n")
+    script.run(**kwargs)
+
+
+def run_family_scripts(protocol, families, target, creds, kwargs):
+    to_run = {}
+    for fam in families:
+        fam_scripts = scripts_loader.get_by_category(protocol, fam)
+        if not fam_scripts:
+            console.print(f"[red]No hay scripts en la familia '{fam}' del protocolo '{protocol}'.[/red]")
+            continue
+        to_run.update(fam_scripts)
+
+    if not to_run:
         return
 
-    if users:
-        smb.password_spray(users, args.password, domain=args.domain)
+    console.print(f"[cyan]Ejecutando {len(to_run)} script(s) de la(s) familia(s) "
+                   f"{'/'.join(families)}...[/cyan]\n")
 
-
-def run_smb_shell(args):
-    if not require_target(args):
-        return
-    target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
-    creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
-    smb = SMBModule(target, creds)
-
-    if not smb.connect():
-        return
-    if not smb.login():
-        return
-
-    shell = SMBShell(smb)
-    shell.run()
-
-
-SMB_ACTIONS = {
-    "enum": run_smb_enum,
-    "spider": run_smb_spider,
-    "spray": run_smb_spray,
-    "shell": run_smb_shell,
-}
+    for name, script_cls in sorted(to_run.items()):
+        console.print(f"[bold cyan]--- {name} ({script_cls.category}) ---[/bold cyan]")
+        script = script_cls(target, creds)
+        try:
+            script.run(**kwargs)
+        except Exception as e:
+            console.print(f"[red]Error ejecutando '{name}': {e}[/red]")
+        console.print()
 
 
 def run_smb(args):
-    action = SMB_ACTIONS.get(args.smb_action)
-    if action is None:
-        console.print("[yellow]No se ha especificado ninguna accion de SMB.[/yellow]")
-        console.print("Acciones disponibles: [bold]enum, spider, spray, shell[/bold]")
-        console.print("Uso: [dim]lobera.py smb <accion> -h[/dim] para ver las opciones de cada una.\n")
+    protocol = "smb"
+
+    if args.script and args.script_fam:
+        console.print("[red]No combines --script y --script-fam en la misma llamada.[/red]")
+        return
+
+    if not args.script and not args.script_fam:
+        if getattr(args, "example", False):
+            console.print("[yellow]--example necesita --script=<nombre> o --script-fam=<familia> "
+                           "para saber de que mostrar ejemplos.[/yellow]")
+        print_protocol_tree(protocol)
         return
 
     if getattr(args, "example", False):
-        show_examples("smb", args.smb_action)
+        if args.script:
+            show_script_example(protocol, args.script)
+        else:
+            for fam in args.script_fam.split("/"):
+                if not fam:
+                    continue
+                console.print(f"\n[bold cyan]--- Familia: {fam} ---[/bold cyan]")
+                fam_scripts = scripts_loader.get_by_category(protocol, fam)
+                if not fam_scripts:
+                    console.print(f"[yellow]No hay scripts en la familia '{fam}'.[/yellow]")
+                    continue
+                for name in sorted(fam_scripts):
+                    show_script_example(protocol, name)
         return
 
+    if not require_target(args):
+        return
+
+    target, creds = _build_target_creds(args)
+    kwargs = build_script_kwargs(args)
+
+    if args.script:
+        run_single_script(protocol, args.script, target, creds, kwargs)
+    else:
+        families = [f for f in args.script_fam.split("/") if f]
+        run_family_scripts(protocol, families, target, creds, kwargs)
+
+
+# Acciones: rpc
+# ============================================================
+ 
+def run_rpc_enum(args):
+    if not require_target(args):
+        return
+    target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
+    creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
+    rpc = RPCModule(target, creds)
+ 
+    if not (args.domains or args.users or args.groups or args.policy):
+        console.print("[yellow]No se ha pedido nada que enumerar: usa --domains, --users, --groups o --policy.[/yellow]")
+        return
+ 
+    if not rpc.connect(pipe="samr"):
+        return
+ 
+    if args.domains:
+        rpc.enum_domains()
+    if args.users:
+        rpc.enum_users(domain_name=args.domain_name)
+    if args.groups:
+        rpc.enum_groups(domain_name=args.domain_name)
+    if args.policy:
+        rpc.get_password_policy(domain_name=args.domain_name)
+ 
+    rpc.close()
+ 
+ 
+def run_rpc_lookup(args):
+    if not require_target(args):
+        return
+ 
+    names = parse_csv(args.names)
+    sids = parse_csv(args.sids)
+ 
+    if not (args.sid or names or sids):
+        console.print("[yellow]No se ha pedido nada que resolver: usa --sid, --names o --sids.[/yellow]")
+        return
+ 
+    target = Target(ip=args.target, domain=args.domain, timeout=args.timeout)
+    creds = Creds(user=args.user, password=args.password, domain=args.domain, hash=args.hash)
+    rpc = RPCModule(target, creds)
+ 
+    if not rpc.connect(pipe="lsarpc"):
+        return
+ 
+    if args.sid:
+        rpc.get_domain_sid()
+    if names:
+        rpc.lookup_names(names)
+    if sids:
+        rpc.lookup_sids(sids)
+ 
+    rpc.close()
+ 
+ 
+RPC_ACTIONS = {
+    "enum": run_rpc_enum,
+    "lookup": run_rpc_lookup,
+}
+ 
+ 
+def run_rpc(args):
+    action = RPC_ACTIONS.get(args.rpc_action)
+    if action is None:
+        console.print("[yellow]No se ha especificado ninguna accion de RPC.[/yellow]")
+        console.print("Acciones disponibles: [bold]enum, lookup[/bold]")
+        console.print("Uso: [dim]lobera.py rpc <accion> -h[/dim] para ver las opciones de cada una.\n")
+        return
+ 
+    if getattr(args, "example", False):
+        show_examples("rpc", args.rpc_action)
+        return
+ 
     action(args)
 
 
@@ -523,12 +698,14 @@ def main():
         # arranque sin dar ningun argumento todavia.
         if not is_first_run:
             console.print("[yellow]No se ha especificado ningun modulo.[/yellow]")
-            console.print("Modulos disponibles: [bold]smb, db[/bold]")
+            console.print("Modulos disponibles: [bold]smb, rpc, db[/bold]")
             console.print("Uso: [dim]lobera.py <modulo> -h[/dim] para ver las acciones de cada uno.\n")
         return
-
+    
     if args.module == "smb":
         run_smb(args)
+    elif args.module == "rpc":
+        run_rpc(args)
     elif args.module == "db":
         run_db(args)
 
@@ -538,4 +715,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         console.print("\n[dim]Interrumpido por el usuario.[/dim]")
-        sys.exit(130)
