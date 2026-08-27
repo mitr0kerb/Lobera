@@ -3,13 +3,21 @@
 import sqlite3
 import os
 import time
-from datetime import datetime
+import hashlib
+import hmac
+import secrets
+import string
+import getpass
+from datetime import datetime, timedelta
 from rich.panel import Panel
 from rich.align import Align
 from rich.text import Text
 from core.output import console
 
 DB_PATH = os.path.join(os.path.expanduser("~"), ".lobera", "session.db")
+
+PBKDF2_ITERATIONS = 200_000
+_PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*-_="
 
 WOLF_ART = r"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠸⢳⡄⠀⠀⠀⠀⠀⠀⠀⠀
@@ -70,6 +78,24 @@ TABLES = {
             timestamp TEXT
         )
     """,
+    "auth": """
+        CREATE TABLE IF NOT EXISTS auth (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            must_change_password INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """,
+    "session": """
+        CREATE TABLE IF NOT EXISTS session (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            expires_at TEXT NOT NULL,
+            created_at TEXT
+        )
+    """,
 }
 
 
@@ -107,7 +133,7 @@ def _create_tables_with_feedback(cur):
         time.sleep(0.25)
 
 
-def _welcome_summary():
+def _welcome_summary(username=None, plaintext_password=None):
     body = (
         f"[bold]Ruta:[/bold] [green]{DB_PATH}[/green]\n\n"
         "Aquí se guardará memoria persistente entre ejecuciones:\n"
@@ -119,6 +145,17 @@ def _welcome_summary():
     )
     console.print()
     console.print(Panel(body, title="[bold cyan]Base de datos lista[/bold cyan]", border_style="cyan", expand=False))
+
+    if username and plaintext_password:
+        cred_body = (
+            f"[bold]Usuario:[/bold] [cyan]{username}[/cyan]\n"
+            f"[bold]Contraseña temporal:[/bold] [yellow]{plaintext_password}[/yellow]\n\n"
+            "[bold red]Esta contraseña NO se volverá a mostrar.[/bold red]\n"
+            "Se te pedirá cambiarla en el próximo inicio de sesión."
+        )
+        console.print(Panel(cred_body, title="[bold red]Credenciales de acceso — guárdalas ahora[/bold red]",
+                             border_style="red", expand=False))
+
     console.print()
     time.sleep(1.0)
 
@@ -127,7 +164,9 @@ def init_db():
     """
     Crea las tablas si no existen. Llamar una vez al arrancar la herramienta.
     Si es la primera vez que se ejecuta Lobera, muestra una secuencia de bienvenida
-    con el lobo ASCII y confirmación por tabla. Si ya existe, no dice nada.
+    con el lobo ASCII, confirmación por tabla, y genera el usuario inicial de acceso
+    (username = usuario del SO, password aleatoria mostrada una única vez).
+    Si ya existe, no dice nada.
     """
     is_first_run = not os.path.exists(DB_PATH)
 
@@ -148,7 +187,8 @@ def init_db():
     conn.close()
 
     if is_first_run:
-        _welcome_summary()
+        username, plaintext_password = create_initial_user()
+        _welcome_summary(username, plaintext_password)
 
     return is_first_run
 
@@ -209,6 +249,39 @@ def get_findings(target_ip):
     return [dict(r) for r in rows]
 
 
+def get_targets():
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM targets ORDER BY first_seen")
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_target(target_ip):
+    """
+    Borra TODO lo relacionado con un target_ip en las 4 tablas:
+    targets, credentials, findings, attack_log.
+    Devuelve un dict con cuántas filas se borraron de cada tabla.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+
+    counts = {}
+    for table in ("credentials", "findings", "attack_log"):
+        cur.execute(f"SELECT COUNT(*) FROM {table} WHERE target_ip = ?", (target_ip,))
+        counts[table] = cur.fetchone()[0]
+        cur.execute(f"DELETE FROM {table} WHERE target_ip = ?", (target_ip,))
+
+    cur.execute("SELECT COUNT(*) FROM targets WHERE ip = ?", (target_ip,))
+    counts["targets"] = cur.fetchone()[0]
+    cur.execute("DELETE FROM targets WHERE ip = ?", (target_ip,))
+
+    conn.commit()
+    conn.close()
+    return counts
+
+
 def get_credentials(target_ip, only_valid=True):
     conn = _connect()
     cur = conn.cursor()
@@ -219,3 +292,160 @@ def get_credentials(target_ip, only_valid=True):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ============================================================
+# Autenticación de acceso a Lobera (tabla auth)
+# ============================================================
+
+def _generate_random_password(length=16):
+    """
+    Genera una contraseña aleatoria criptográficamente segura usando `secrets`
+    (no `random`, que no es apto para fines de seguridad).
+    Garantiza al menos una mayúscula, una minúscula, un dígito y un símbolo.
+    """
+    while True:
+        pwd = "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
+        if (any(c.islower() for c in pwd) and any(c.isupper() for c in pwd)
+                and any(c.isdigit() for c in pwd)
+                and any(c in "!@#$%^&*-_=" for c in pwd)):
+            return pwd
+
+
+def _hash_password(password, salt=None):
+    """
+    PBKDF2-HMAC-SHA256 con salt aleatorio. No usamos bcrypt/argon2 para
+    mantener cero dependencias externas en session_db.py (mismo criterio
+    que ya se aplicó al elegir sqlite3 de la stdlib en ADR-01).
+    """
+    if salt is None:
+        salt = secrets.token_hex(16)
+    pwd_hash = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS
+    ).hex()
+    return pwd_hash, salt
+
+
+def _verify_password(password, salt, expected_hash):
+    """Comparación en tiempo constante para evitar timing attacks."""
+    computed, _ = _hash_password(password, salt)
+    return hmac.compare_digest(computed, expected_hash)
+
+
+def create_initial_user():
+    """
+    Se llama SOLO durante la secuencia de primera ejecución, desde init_db().
+    Crea el usuario inicial: username = usuario del sistema operativo,
+    password = aleatoria. Devuelve (username, password_en_claro) para que
+    el llamador la muestre en pantalla UNA vez — no se vuelve a poder
+    recuperar en claro después de esta llamada.
+    """
+    username = getpass.getuser()
+    plaintext_password = _generate_random_password()
+    pwd_hash, salt = _hash_password(plaintext_password)
+    now = datetime.now().isoformat()
+
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO auth (id, username, password_hash, salt, must_change_password, created_at, updated_at)
+        VALUES (1, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+    """, (username, pwd_hash, salt, now, now))
+    conn.commit()
+    conn.close()
+
+    return username, plaintext_password
+
+
+def get_auth():
+    """Devuelve {'username':..., 'must_change_password': 0/1} o None si aún no existe."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT username, must_change_password FROM auth WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def verify_login(username, password):
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT username, password_hash, salt FROM auth WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+    if not row or row["username"] != username:
+        return False
+    return _verify_password(password, row["salt"], row["password_hash"])
+
+
+def change_password(new_password):
+    pwd_hash, salt = _hash_password(new_password)
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE auth SET password_hash = ?, salt = ?, must_change_password = 0, updated_at = ?
+        WHERE id = 1
+    """, (pwd_hash, salt, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# Sesión de acceso ("recuérdame X tiempo") — tabla session
+# ============================================================
+#
+# No usamos token/hash aquí: la propia session.db ya es el límite de
+# confianza (contiene credenciales/hashes de las máquinas atacadas en
+# claro). Si alguien ya tiene acceso de lectura a este fichero, la sesión
+# guardada no añade una superficie de ataque nueva. Guardamos solo un
+# timestamp de expiración.
+
+def start_session(ttl_minutes):
+    """
+    Marca la sesión de acceso a Lobera como activa durante ttl_minutes
+    a partir de ahora. Se llama justo después de un login correcto
+    (y, si aplicaba, después del cambio de contraseña obligatorio).
+    """
+    expires_at = (datetime.now() + timedelta(minutes=ttl_minutes)).isoformat()
+    now = datetime.now().isoformat()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO session (id, expires_at, created_at)
+        VALUES (1, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            expires_at = excluded.expires_at,
+            created_at = excluded.created_at
+    """, (expires_at, now))
+    conn.commit()
+    conn.close()
+
+
+def get_active_session():
+    """
+    Devuelve el datetime de expiración si hay una sesión válida (no
+    expirada), o None si no hay sesión guardada o ya caducó.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT expires_at FROM session WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    expires_at = datetime.fromisoformat(row["expires_at"])
+    if datetime.now() >= expires_at:
+        return None
+    return expires_at
+
+
+def clear_session():
+    """Invalida la sesión guardada (logout manual). No usada aún desde la CLI."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM session WHERE id = 1")
+    conn.commit()
+    conn.close()
