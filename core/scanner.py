@@ -5,17 +5,24 @@ import os
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
-from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
 from core.output import console
 from core import session_db
-from scripts.loader import get_script
 
 
 EXPORT_FORMATS = ["json", "html", "xml", "yaml"]
+
+
+def _get_script_cls(protocol, script_name):
+    """
+    Busca la clase de un script usando el loader existente.
+    Devuelve la clase o None si no se encuentra.
+    """
+    from scripts.loader import discover_scripts
+    registry = discover_scripts(protocol=protocol)
+    return registry.get(script_name)
 
 
 class ScanStep:
@@ -79,9 +86,7 @@ class ScanContext:
 
 
 class Scanner:
-    """
-    Motor genérico de scan automático.
-    """
+    """Motor genérico de scan automático."""
 
     VERBOSE_LABELS = {
         1: "Básico — solo hallazgos críticos",
@@ -102,7 +107,7 @@ class Scanner:
         self.export_fmt  = export_fmt
         self.ctx         = ScanContext({})
 
-    # ── Helpers visuales ─────────────────────────────────────────────────────
+    # ── Helpers visuales ──────────────────────────────────────────────────────
 
     def _section(self, title):
         console.rule(f"[bold {self.color}]{title}[/bold {self.color}]")
@@ -140,16 +145,15 @@ class Scanner:
 
             self._section(f"[{i}/{total}] {step.script_name}")
 
-            script_cls = get_script(self.protocol.lower(), step.script_name)
+            script_cls = _get_script_cls(self.protocol.lower(), step.script_name)
             if script_cls is None:
-                self._warn(f"Script '{step.script_name}' no encontrado — omitido")
+                self._warn(f"Script '{step.script_name}' no encontrado en '{self.protocol.lower()}' — omitido")
                 continue
 
             try:
                 script = script_cls(self.target, self.creds)
                 kwargs = self._build_kwargs(step.script_name)
 
-                # En verbose < 3 pasamos silent=True para suprimir output raw
                 if self.verbose < 3:
                     kwargs["silent"] = True
 
@@ -197,7 +201,7 @@ class Scanner:
             return "sí" if result else "no"
         return str(result)[:80]
 
-    # ── Handlers de resultado por script ─────────────────────────────────────
+    # ── Handlers de resultado por script ──────────────────────────────────────
 
     def _on_result(self, script_name, result):
         handlers = {
@@ -228,10 +232,15 @@ class Scanner:
         if not result:
             self._info("No se encontraron shares accesibles")
             return
-        non_special = [r for r in result if "special" not in str(r[1]).lower()]
+        non_special = [
+            r for r in result
+            if isinstance(r, (list, tuple)) and len(r) >= 2
+            and "special" not in str(r[1]).lower()
+        ]
         self._ok(f"{len(result)} share(s) encontrados, {len(non_special)} no especiales")
-        for name, stype, comment in result:
-            self._debug(f"    {name:20s} {stype:20s} {comment}")
+        for row in result:
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                self._debug(f"    {str(row[0]):20s} {str(row[1]):20s}")
 
     def _on_gpp(self, result):
         if result:
@@ -264,7 +273,7 @@ class Scanner:
         critical_scripts = {"signing-check", "null-session", "gpp-password", "password-spray"}
 
         for step in self.steps:
-            result = self.ctx.results.get(step.script_name)
+            result  = self.ctx.results.get(step.script_name)
             if step.script_name not in self.ctx.results:
                 summary = "[dim]omitido[/dim]"
                 is_crit = ""

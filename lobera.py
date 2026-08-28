@@ -405,13 +405,10 @@ def build_parser():
     smb.add_argument("--keywords",  default=None)
     smb.add_argument("--depth",     type=int, default=5)
     smb.add_argument("--userlist",  default=None, metavar="FILE")
-        # --- smb scanner ---
-    scanner_parser = smb_subparsers.add_parser("scanner", help="Modo autopwn interactivo SMB")
-    add_common_target_args(scanner_parser)
-    scanner_parser.add_argument(
-        "--userlist", default=None, metavar="FILE",
-        help="Wordlist de usuarios para spray (opcional, también se puede dar durante el scan)"
-    )
+    smb.add_argument("--scanner",   action="store_true",
+                     help="Modo autopwn interactivo SMB")
+
+
 
     # ---- Kerberos ----
     krb = subs.add_parser("kerberos", help="Scripts Kerberos")
@@ -542,12 +539,12 @@ def build_parser():
 # ============================================================
 
 def run_smb(args):
-    if args.smb_action == "scanner":
+    if getattr(args, "scanner", False):
         from scripts.smb.scanner import run_smb_scanner
         run_smb_scanner(args)
-        return 
-
+        return
     run_module_generic("smb", args)
+   
 
 
 def run_kerberos(args):
