@@ -1,512 +1,1276 @@
 # modules/rpc.py
 
-from impacket.dcerpc.v5 import transport, samr, lsat, lsad
-from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
-from impacket.dcerpc.v5.samr import SID_NAME_USE
+"""
+RPCModule — capa de acceso a interfaces RPC de Windows sobre impacket.
+
+Pipes/interfaces cubiertas:
+  \\pipe\\samr     → SAMR   : usuarios, grupos, políticas de cuenta
+  \\pipe\\lsarpc  → LSARPC : SIDs, privilegios, trust relationships, secretos LSA
+  \\pipe\\srvsvc  → SRVSVC : sesiones activas, shares, información del servidor
+  \\pipe\\wkssvc  → WKSSVC : información de la workstation, sesiones
+  \\pipe\\atsvc   → AT/TSCH: tareas programadas (AT legacy)
+  \\pipe\\svcctl  → SCMR   : Service Control Manager (crear/arrancar servicios)
+  \\pipe\\winreg  → WINREG : lectura de registro remoto
+  \\pipe\\epmapper→ EPM    : endpoint mapper (enumeración de servicios RPC)
+
+API pública:
+  connect()            → abre SMB + IPC$
+  disconnect()
+
+  SAMR:
+    get_users()
+    get_groups()
+    get_domain_info()
+    get_user_info(username)
+    enumerate_local_admins()
+
+  LSARPC:
+    get_lsa_domain_info()
+    lookup_sids(sids)
+    lookup_names(names)
+    enumerate_privileges()
+    enumerate_accounts_with_privilege(priv_name)
+    enumerate_trusted_domains()
+    get_lsa_secrets()        ← requiere SYSTEM/DA
+
+  SRVSVC:
+    get_server_info()
+    get_active_sessions()
+    get_shares()
+    get_open_files()
+
+  WKSSVC:
+    get_workstation_info()
+    get_logged_on_users()
+
+  SVCCTL (SCM):
+    list_services()
+    create_service(name, display, binary_path)
+    start_service(name)
+    stop_service(name)
+    delete_service(name)
+    exec_via_service(command)     ← create + start + delete
+
+  WINREG:
+    reg_query(hive, key, value)
+    reg_enum_keys(hive, key)
+    reg_enum_values(hive, key)
+
+  EPM:
+    enumerate_endpoints()
+"""
+
+import os
+import time
+
+from impacket.dcerpc.v5 import transport, samr, lsat, lsad, srvsvc, wkst, scmr, rrp, epm
+from impacket.dcerpc.v5 import tsch   # Task Scheduler
+from impacket.dcerpc.v5.dtypes import NULL, MAXIMUM_ALLOWED
 from impacket.dcerpc.v5.rpcrt import DCERPCException
-from impacket.nt_errors import STATUS_MORE_ENTRIES
-from core.output import print_result, print_table, print_check
+from impacket import uuid as impacket_uuid
+
+from core.output import print_result, print_check, print_table, console
 from core import session_db
 
-RPC_PIPES = {
-    "samr": r'\pipe\samr',
-    "lsarpc": r'\pipe\lsarpc',
+# ---------------------------------------------------------------------------
+# Constantes
+# ---------------------------------------------------------------------------
+
+# Hives de registro
+HKLM = 0x80000002
+HKCU = 0x80000001
+HKCR = 0x80000000
+HKU  = 0x80000003
+
+HIVE_NAMES = {
+    "HKLM": HKLM,
+    "HKCU": HKCU,
+    "HKCR": HKCR,
+    "HKU":  HKU,
 }
 
-BIND_UUIDS = {
-    "samr": samr.MSRPC_UUID_SAMR,
-    "lsarpc": lsat.MSRPC_UUID_LSAT,
+# Privilegios interesantes desde perspectiva ofensiva
+INTERESTING_PRIVS = {
+    "SeDebugPrivilege":          "Leer/escribir memoria de cualquier proceso (incluido LSASS)",
+    "SeImpersonatePrivilege":    "Impersonation → Potato attacks (privesc a SYSTEM)",
+    "SeAssignPrimaryToken":      "Asignar token primario → privesc",
+    "SeBackupPrivilege":         "Leer cualquier fichero ignorando DACL → volcado de SAM/SYSTEM",
+    "SeRestorePrivilege":        "Escribir cualquier fichero ignorando DACL",
+    "SeTakeOwnershipPrivilege":  "Tomar posesión de cualquier objeto",
+    "SeLoadDriverPrivilege":     "Cargar driver arbitrario → BYOVD",
+    "SeCreateTokenPrivilege":    "Crear tokens de acceso arbitrarios",
+    "SeTcbPrivilege":            "Actuar como parte del OS (nivel SYSTEM)",
+    "SeEnableDelegationPrivilege": "Habilitar delegación Kerberos (DA typical)",
 }
 
-# Sentinela de "nunca" para OLD_LARGE_INTEGER/LARGE_INTEGER relativos
-# (0x8000000000000000 como entero con signo de 64 bits = -9223372036854775808)
-_NEVER_SENTINEL = -0x8000000000000000
+# Estado de servicios
+SERVICE_STATE = {
+    scmr.SERVICE_STOPPED:          "STOPPED",
+    scmr.SERVICE_START_PENDING:    "START_PENDING",
+    scmr.SERVICE_STOP_PENDING:     "STOP_PENDING",
+    scmr.SERVICE_RUNNING:          "RUNNING",
+    scmr.SERVICE_CONTINUE_PENDING: "CONTINUE_PENDING",
+    scmr.SERVICE_PAUSE_PENDING:    "PAUSE_PENDING",
+    scmr.SERVICE_PAUSED:           "PAUSED",
+}
 
+# Tipo de inicio de servicios
+SERVICE_START_TYPE = {
+    scmr.SERVICE_BOOT_START:   "BOOT",
+    scmr.SERVICE_SYSTEM_START: "SYSTEM",
+    scmr.SERVICE_AUTO_START:   "AUTO",
+    scmr.SERVICE_DEMAND_START: "MANUAL",
+    scmr.SERVICE_DISABLED:     "DISABLED",
+}
+
+
+# ---------------------------------------------------------------------------
+# RPCModule
+# ---------------------------------------------------------------------------
 
 class RPCModule:
+    """
+    Módulo RPC de Lobera.
+
+    Abre una conexión SMB al share IPC$ y luego enlaza a cada interfaz
+    RPC bajo demanda. Cada método de alto nivel gestiona el binding
+    internamente — no hace falta llamar a _bind() manualmente.
+    """
+
     def __init__(self, target, creds):
-        self.target = target      # instancia de Target
-        self.creds = creds        # instancia de Creds
-        self.dce = None
-        self.rpctransport = None
-        self.current_pipe = None      # "samr" | "lsarpc" -- el pipe actualmente bindeado
-        self.server_handle = None     # handle de servidor SAMR (hSamrConnect)
-        self.policy_handle = None     # handle de politica LSARPC (hLsarOpenPolicy2)
-        self.domain_handle = None     # handle de dominio SAMR abierto (hSamrOpenDomain)
-        self.domain_name = None       # nombre del dominio actualmente abierto en SAMR
-        self.domain_sid = None        # SID del dominio actualmente abierto en SAMR
-
-    def _proto(self):
-        return "RPC"
+        self.target = target
+        self.creds  = creds
+        self._smb   = None   # SMBConnection subyacente
+        self._dce_cache = {} # {pipe_path: dce_connection} para reutilizar
 
     # ------------------------------------------------------------------
-    # Conexion / bind
+    # Conexión base (IPC$)
     # ------------------------------------------------------------------
 
-    def connect(self, pipe="samr"):
+    def connect(self):
         """
-        Abre un named pipe MSRPC sobre IPC$ (ncacn_np) y hace bind al interfaz
-        indicado. A diferencia de SMBModule, aqui connect() es TAMBIEN login():
-        el pipe MSRPC exige autenticacion (o null session) para poder siquiera
-        abrirse, asi que no existe un "connect sin credenciales" independiente
-        como en SMB puro.
-
-        pipe: "samr"   -> SamrXxx: enumeracion de usuarios/grupos y politica
-                           de contrasenas/bloqueo.
-              "lsarpc"  -> LsarXxx: resolucion de SIDs<->nombres y SID del
-                           dominio via la interfaz de politica LSA.
+        Abre la conexión SMB y autentica. No hace bind RPC todavía.
+        Los binds se hacen bajo demanda en cada método.
         """
-        if pipe not in RPC_PIPES:
-            print_result(self._proto(), self.target.ip, "fail", f"pipe RPC desconocido: {pipe}")
-            return False
-
+        from impacket.smbconnection import SMBConnection
         try:
-            string_binding = r'ncacn_np:%s[%s]' % (self.target.ip, RPC_PIPES[pipe])
-            self.rpctransport = transport.DCERPCTransportFactory(string_binding)
-            self.rpctransport.setRemoteHost(self.target.ip)
-            if hasattr(self.rpctransport, "set_dport"):
-                self.rpctransport.set_dport(445)
-
-            if hasattr(self.rpctransport, "set_credentials"):
-                if self.creds.hash:
-                    # Mismo criterio que SMBModule.login(): solo se usa la
-                    # parte NT del hash, LM se deja vacio (ver ADR de smb.py).
-                    nthash = self.creds.hash.split(":")[-1]
-                    self.rpctransport.set_credentials(
-                        self.creds.user, "", self.creds.domain, "", nthash
-                    )
-                else:
-                    self.rpctransport.set_credentials(
-                        self.creds.user or "", self.creds.password or "", self.creds.domain or ""
-                    )
-
-            self.dce = self.rpctransport.get_dce_rpc()
-            self.dce.connect()
-            self.dce.bind(BIND_UUIDS[pipe])
-            self.current_pipe = pipe
-
+            smb = SMBConnection(
+                remoteName=self.target.ip,
+                remoteHost=self.target.ip,
+                timeout=self.target.timeout,
+            )
+            if self.creds.hash:
+                nthash = self.creds.hash.split(":")[-1]
+                smb.login(self.creds.user, "", self.creds.domain,
+                          lmhash="", nthash=nthash)
+            else:
+                smb.login(
+                    self.creds.user or "", self.creds.password or "",
+                    self.creds.domain or "",
+                )
+            self._smb = smb
             session_db.save_target(self.target.ip, domain=self.target.domain)
-            print_result(self._proto(), self.target.ip, "ok", f"bind correcto sobre IPC$ a {RPC_PIPES[pipe]}")
+            print_result("RPC", self.target.ip, "ok",
+                         "conexión SMB establecida para IPC$")
             return True
-
-        except Exception as e:
-            self.dce = None
-            self.current_pipe = None
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"no se pudo bindear {pipe}: [bold white]{reason}[/bold white]")
+        except Exception as exc:
+            reason = exc.getErrorString()[0] if hasattr(exc, "getErrorString") else str(exc)
+            print_result("RPC", self.target.ip, "fail",
+                         "no se pudo conectar: {}".format(reason))
             return False
 
-    def close(self):
-        """Cierra la conexion DCERPC actual, si hay una abierta."""
-        if self.dce is not None:
+    def disconnect(self):
+        for dce in self._dce_cache.values():
             try:
-                self.dce.disconnect()
+                dce.disconnect()
             except Exception:
                 pass
-        self.dce = None
-        self.current_pipe = None
-        self.server_handle = None
-        self.policy_handle = None
-        self.domain_handle = None
-
-    def _require_pipe(self, pipe):
-        if self.dce is None or self.current_pipe != pipe:
-            print_result(self._proto(), self.target.ip, "fail",
-                         f"esta operacion requiere connect(pipe='{pipe}') primero")
-            return False
-        return True
-
-    # ------------------------------------------------------------------
-    # SAMR -- handles internos
-    # ------------------------------------------------------------------
-
-    def _get_server_handle(self):
-        if self.server_handle is None:
-            resp = samr.hSamrConnect(self.dce)
-            self.server_handle = resp['ServerHandle']
-        return self.server_handle
-
-    def enum_domains(self, silent=False):
-        """
-        Lista los dominios SAM visibles en el servidor (pipe 'samr').
-        En una maquina no-DC casi siempre solo aparece "Builtin" y el nombre
-        NetBIOS local; en un DC aparece tambien el dominio AD real.
-        Equivalente a `rpcclient> enumdomains`.
-        """
-        if not self._require_pipe("samr"):
-            return []
-
-        try:
-            server_handle = self._get_server_handle()
-            resp = samr.hSamrEnumerateDomainsInSamServer(self.dce, server_handle)
-            domains = [str(d['Name']) for d in resp['Buffer']['Buffer']]
-
-            if not silent:
-                print_table(f"Dominios SAM en {self.target.ip}", ["Dominio"], [(d,) for d in domains])
-            for d in domains:
-                session_db.save_finding(self.target.ip, "RPC", "samr_domain", d)
-            return domains
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            if not silent:
-                print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
-            return []
-
-    def open_domain(self, domain_name=None):
-        """
-        Abre un handle de dominio SAMR (hSamrLookupDomainInSamServer +
-        hSamrOpenDomain) y guarda su SID. Si domain_name es None, elige
-        automaticamente el primer dominio NO "Builtin" devuelto por
-        enum_domains() (o "Builtin" si es el unico disponible).
-        Requiere connect(pipe='samr') previo. Rellena self.domain_handle,
-        self.domain_name y self.domain_sid; devuelve el handle o None.
-        """
-        if not self._require_pipe("samr"):
-            return None
-
-        try:
-            server_handle = self._get_server_handle()
-
-            if domain_name is None:
-                domains = self.enum_domains(silent=True)
-                if not domains:
-                    print_result(self._proto(), self.target.ip, "fail", "no se encontro ningun dominio que abrir")
-                    return None
-                non_builtin = [d for d in domains if d.lower() != "builtin"]
-                domain_name = non_builtin[0] if non_builtin else domains[0]
-
-            resp = samr.hSamrLookupDomainInSamServer(self.dce, server_handle, domain_name)
-            domain_id = resp['DomainId']
-
-            resp = samr.hSamrOpenDomain(self.dce, serverHandle=server_handle, domainId=domain_id)
-            self.domain_handle = resp['DomainHandle']
-            self.domain_name = domain_name
-            self.domain_sid = domain_id.formatCanonical()
-
-            session_db.save_finding(self.target.ip, "RPC", "domain_sid", f"{domain_name}: {self.domain_sid}")
-            print_result(self._proto(), self.target.ip, "ok", f"dominio '{domain_name}' abierto, SID {self.domain_sid}")
-            return self.domain_handle
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"no se pudo abrir el dominio: [bold white]{reason}[/bold white]")
-            return None
-
-    def _ensure_domain(self, domain_name):
-        """Abre el dominio si aun no hay uno abierto, o si se pide uno distinto al ya abierto."""
-        if self.domain_handle is None or (domain_name and domain_name != self.domain_name):
-            return self.open_domain(domain_name) is not None
-        return True
-
-    # ------------------------------------------------------------------
-    # SAMR -- enumeracion
-    # ------------------------------------------------------------------
-
-    def enum_users(self, domain_name=None, silent=False):
-        """
-        Enumera todos los usuarios del dominio abierto via SAMR, paginando
-        con STATUS_MORE_ENTRIES. Equivalente a `rpcclient> enumdomusers`.
-        Devuelve una lista de tuplas (rid, nombre).
-        """
-        if not self._require_pipe("samr"):
-            return []
-        if not self._ensure_domain(domain_name):
-            return []
-
-        users = []
-        try:
-            enumeration_context = 0
-            status = STATUS_MORE_ENTRIES
-            while status == STATUS_MORE_ENTRIES:
-                try:
-                    resp = samr.hSamrEnumerateUsersInDomain(
-                        self.dce, self.domain_handle, enumerationContext=enumeration_context
-                    )
-                except DCERPCException as e:
-                    if "STATUS_MORE_ENTRIES" not in str(e):
-                        raise
-                    resp = e.get_packet()
-
-                for entry in resp['Buffer']['Buffer']:
-                    users.append((entry['RelativeId'], str(entry['Name'])))
-
-                enumeration_context = resp['EnumerationContext']
-                status = resp['ErrorCode']
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            if not silent:
-                print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
-            return users
-
-        if not silent:
-            print_table(f"Usuarios de {self.domain_name} en {self.target.ip}", ["RID", "Usuario"], users)
-
-        if users:
-            names = ", ".join(name for _, name in users)
-            session_db.save_finding(self.target.ip, "RPC", "samr_users", f"{len(users)} usuario(s) en {self.domain_name}: {names}")
-            if not silent:
-                print_result(self._proto(), self.target.ip, "pwned", f"{len(users)} usuario(s) enumerados vía SAMR")
-        elif not silent:
-            print_result(self._proto(), self.target.ip, "info", "ningun usuario enumerado")
-
-        return users
-
-    def enum_groups(self, domain_name=None, silent=False):
-        """
-        Enumera todos los grupos del dominio abierto via SAMR, paginando
-        con STATUS_MORE_ENTRIES. Equivalente a `rpcclient> enumdomgroups`.
-        Devuelve una lista de tuplas (rid, nombre).
-        """
-        if not self._require_pipe("samr"):
-            return []
-        if not self._ensure_domain(domain_name):
-            return []
-
-        groups = []
-        try:
-            enumeration_context = 0
-            status = STATUS_MORE_ENTRIES
-            while status == STATUS_MORE_ENTRIES:
-                try:
-                    resp = samr.hSamrEnumerateGroupsInDomain(
-                        self.dce, self.domain_handle, enumerationContext=enumeration_context
-                    )
-                except DCERPCException as e:
-                    if "STATUS_MORE_ENTRIES" not in str(e):
-                        raise
-                    resp = e.get_packet()
-
-                for entry in resp['Buffer']['Buffer']:
-                    groups.append((entry['RelativeId'], str(entry['Name'])))
-
-                enumeration_context = resp['EnumerationContext']
-                status = resp['ErrorCode']
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            if not silent:
-                print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
-            return groups
-
-        if not silent:
-            print_table(f"Grupos de {self.domain_name} en {self.target.ip}", ["RID", "Grupo"], groups)
-
-        if groups:
-            names = ", ".join(name for _, name in groups)
-            session_db.save_finding(self.target.ip, "RPC", "samr_groups", f"{len(groups)} grupo(s) en {self.domain_name}: {names}")
-            if not silent:
-                print_result(self._proto(), self.target.ip, "pwned", f"{len(groups)} grupo(s) enumerados vía SAMR")
-        elif not silent:
-            print_result(self._proto(), self.target.ip, "info", "ningun grupo enumerado")
-
-        return groups
-
-    # ------------------------------------------------------------------
-    # SAMR -- politica de contrasenas / bloqueo
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _old_large_int_to_signed(old_large_int):
-        """HighPart/LowPart (OLD_LARGE_INTEGER) -> entero con signo de 64 bits."""
-        value = (old_large_int['HighPart'] << 32) | (old_large_int['LowPart'] & 0xFFFFFFFF)
-        if value >= 0x8000000000000000:
-            value -= 0x10000000000000000
-        return value
-
-    @staticmethod
-    def _relative_100ns_to_human(value, unit="days"):
-        """Convierte un intervalo relativo en unidades de 100ns (negativo,
-        convencion MS-SAMR/MS-LSAD) a texto legible. 0 = sin restriccion,
-        el sentinela de 64 bits con signo = "nunca"."""
-        if value == 0:
-            return "0"
-        if value <= _NEVER_SENTINEL:
-            return "nunca"
-        seconds = abs(value) / 10_000_000
-        if unit == "days":
-            return f"{seconds / 86400:.1f} dia(s)"
-        return f"{seconds / 60:.1f} minuto(s)"
-
-    def get_password_policy(self, domain_name=None):
-        """
-        Consulta la politica de contrasenas y de bloqueo de cuenta del
-        dominio abierto via SAMR (DomainPasswordInformation +
-        DomainLockoutInformation). Equivalente a `rpcclient> getdompwinfo`
-        mas la parte de lockout de `querydominfo`.
-        Devuelve un dict, o None si falla.
-        """
-        if not self._require_pipe("samr"):
-            return None
-        if not self._ensure_domain(domain_name):
-            return None
-
-        try:
-            resp = samr.hSamrQueryInformationDomain(
-                self.dce, self.domain_handle,
-                domainInformationClass=samr.DOMAIN_INFORMATION_CLASS.DomainPasswordInformation
-            )
-            pw = resp['Buffer']['Password']
-
-            resp = samr.hSamrQueryInformationDomain(
-                self.dce, self.domain_handle,
-                domainInformationClass=samr.DOMAIN_INFORMATION_CLASS.DomainLockoutInformation
-            )
-            lockout = resp['Buffer']['Lockout']
-
-            props = pw['PasswordProperties']
-            policy = {
-                "min_password_length": pw['MinPasswordLength'],
-                "password_history_length": pw['PasswordHistoryLength'],
-                "complexity_required": bool(props & samr.DOMAIN_PASSWORD_COMPLEX),
-                "cleartext_storage_allowed": bool(props & samr.DOMAIN_PASSWORD_STORE_CLEARTEXT),
-                "max_password_age": self._relative_100ns_to_human(self._old_large_int_to_signed(pw['MaxPasswordAge']), "days"),
-                "min_password_age": self._relative_100ns_to_human(self._old_large_int_to_signed(pw['MinPasswordAge']), "days"),
-                "lockout_threshold": lockout['LockoutThreshold'],
-                "lockout_duration": self._relative_100ns_to_human(lockout['LockoutDuration']['Data'], "minutes"),
-                "lockout_observation_window": self._relative_100ns_to_human(lockout['LockoutObservationWindow']['Data'], "minutes"),
-            }
-
-            rows = [(k, str(v)) for k, v in policy.items()]
-            print_table(f"Politica de contrasenas - {self.domain_name} en {self.target.ip}", ["Parametro", "Valor"], rows)
-
-            detail = (f"min_len={policy['min_password_length']} "
-                      f"complexity={policy['complexity_required']} "
-                      f"lockout_threshold={policy['lockout_threshold']}")
-            session_db.save_finding(self.target.ip, "RPC", "password_policy", detail)
-            print_check(f"Umbral de bloqueo: {policy['lockout_threshold']} intento(s) fallido(s)",
-                        ok=policy['lockout_threshold'] > 0)
-
-            return policy
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
-            return None
-
-    # ------------------------------------------------------------------
-    # LSARPC -- politica / resolucion SID<->nombre
-    # ------------------------------------------------------------------
-
-    def _get_policy_handle(self):
-        if self.policy_handle is None:
-            resp = lsad.hLsarOpenPolicy2(self.dce, MAXIMUM_ALLOWED | lsat.POLICY_LOOKUP_NAMES)
-            self.policy_handle = resp['PolicyHandle']
-        return self.policy_handle
-
-    def get_domain_sid(self):
-        """
-        Resuelve el SID del dominio (cuenta local, "Account Domain") via
-        LSARPC (pipe 'lsarpc'), sin necesidad de tener un handle SAMR
-        abierto. Equivalente al SID que muestra `rpcclient> lsaquery`.
-        Devuelve el SID como string canonico ("S-1-5-21-...") o None.
-        """
-        if not self._require_pipe("lsarpc"):
-            return None
-
-        try:
-            policy_handle = self._get_policy_handle()
-            resp = lsad.hLsarQueryInformationPolicy2(
-                self.dce, policy_handle, lsad.POLICY_INFORMATION_CLASS.PolicyAccountDomainInformation
-            )
-            info = resp['PolicyInformation']['PolicyAccountDomainInfo']
-            sid = info['DomainSid'].formatCanonical()
-            domain_name = str(info['DomainName'])
-
-            session_db.save_finding(self.target.ip, "RPC", "domain_sid", f"{domain_name}: {sid}")
-            print_result(self._proto(), self.target.ip, "ok", f"SID del dominio '{domain_name}': {sid}")
-            return sid
-
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
-            return None
-
-    def lookup_names(self, names):
-        """
-        Resuelve una lista de nombres ("DOMINIO\\usuario" o solo "usuario")
-        a sus SIDs via LSARPC. Equivalente a `rpcclient> lookupnames`.
-        Devuelve una lista de tuplas (nombre, sid, tipo).
-        """
-        if not self._require_pipe("lsarpc"):
-            return []
-
-        results = []
-        try:
-            policy_handle = self._get_policy_handle()
+        self._dce_cache.clear()
+        if self._smb:
             try:
-                resp = lsat.hLsarLookupNames(self.dce, policy_handle, names)
-            except DCERPCException as e:
-                if "STATUS_NONE_MAPPED" in str(e):
-                    print_result(self._proto(), self.target.ip, "info", "ningun nombre pudo resolverse")
-                    return []
-                if "STATUS_SOME_NOT_MAPPED" not in str(e):
-                    raise
-                resp = e.get_packet()
+                self._smb.logoff()
+            except Exception:
+                pass
+            self._smb = None
 
-            domains = resp['ReferencedDomains']['Domains']
-            for name, item in zip(names, resp['TranslatedSids']['Sids']):
-                if item['Use'] == SID_NAME_USE.SidTypeUnknown:
-                    continue
-                domain_sid = domains[item['DomainIndex']]['Sid'].formatCanonical()
-                sid = f"{domain_sid}-{item['RelativeId']}"
-                type_name = SID_NAME_USE.enumItems(item['Use']).name
-                results.append((name, sid, type_name))
+    def _get_dce(self, pipe, iface_uuid, iface_version):
+        """
+        Devuelve una conexión DCE/RPC ya enlazada a la interfaz solicitada.
+        Reutiliza conexiones ya abiertas (caché por pipe).
+        """
+        cache_key = "{}:{}".format(pipe, iface_uuid)
+        if cache_key in self._dce_cache:
+            return self._dce_cache[cache_key]
 
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+        rpctransport = transport.SMBTransport(
+            self.target.ip,
+            filename=pipe,
+            smb_connection=self._smb,
+        )
+        dce = rpctransport.get_dce_rpc()
+        dce.connect()
+        dce.bind(impacket_uuid.uuidtup_to_bin((iface_uuid, iface_version)))
+        self._dce_cache[cache_key] = dce
+        return dce
+
+    def _dce_samr(self):
+        return self._get_dce(r"\pipe\samr",
+                             "12345778-1234-ABCD-EF00-0123456789AC", "1.0")
+
+    def _dce_lsarpc(self):
+        return self._get_dce(r"\pipe\lsarpc",
+                             "12345778-1234-ABCD-EF00-0123456789AB", "0.0")
+
+    def _dce_srvsvc(self):
+        return self._get_dce(r"\pipe\srvsvc",
+                             "4B324FC8-1670-01D3-1278-5A47BF6EE188", "3.0")
+
+    def _dce_wkssvc(self):
+        return self._get_dce(r"\pipe\wkssvc",
+                             "6BFFD098-A112-3610-9833-46C3F87E345A", "1.0")
+
+    def _dce_svcctl(self):
+        return self._get_dce(r"\pipe\svcctl",
+                             "367ABB81-9844-35F1-AD32-98F038001003", "2.0")
+
+    def _dce_winreg(self):
+        return self._get_dce(r"\pipe\winreg",
+                             "338CD001-2244-31F1-AAAA-900038001003", "1.0")
+
+    def _dce_epm(self):
+        return self._get_dce(r"\pipe\epmapper",
+                             "E1AF8308-5D1F-11C9-91A4-08002B14A0FA", "3.0")
+
+    # ==================================================================
+    # SAMR — Security Account Manager Remote Protocol
+    # ==================================================================
+
+    def _samr_open_domain(self, dce):
+        """Helper: abre el handle de dominio SAMR."""
+        resp = samr.hSamrConnect(dce)
+        server_handle = resp["ServerHandle"]
+
+        resp2 = samr.hSamrEnumerateDomainsInSamServer(dce, server_handle)
+        domains = resp2["Buffer"]["Buffer"]
+
+        # Preferimos el primero que no sea "Builtin"
+        domain_name = None
+        for d in domains:
+            name = d["Name"]["Buffer"]
+            if name.upper() != "BUILTIN":
+                domain_name = name
+                break
+        if domain_name is None and domains:
+            domain_name = domains[0]["Name"]["Buffer"]
+
+        resp3 = samr.hSamrLookupDomainInSamServer(dce, server_handle, domain_name)
+        domain_sid = resp3["DomainId"]
+
+        resp4 = samr.hSamrOpenDomain(dce, server_handle,
+                                      samr.DOMAIN_READ_PASSWORD_PARAMETERS |
+                                      samr.DOMAIN_READ_OTHER_PARAMETERS |
+                                      samr.DOMAIN_LIST_ACCOUNTS |
+                                      samr.DOMAIN_LOOKUP,
+                                      domain_sid)
+        domain_handle = resp4["DomainHandle"]
+        return server_handle, domain_handle, domain_name, domain_sid
+
+    def get_users(self):
+        """
+        Enumera todos los usuarios del dominio vía SAMR.
+
+        Retorna lista de dicts: {rid, username, full_name, description,
+                                  last_logon, pwd_last_set, acb_flags}
+        """
+        try:
+            dce = self._dce_samr()
+            srv_h, dom_h, domain_name, domain_sid = self._samr_open_domain(dce)
+
+            resp = samr.hSamrEnumerateUsersInDomain(dce, dom_h)
+            users_enum = resp["Buffer"]["Buffer"]
+
+            results = []
+            for u in users_enum:
+                rid      = u["RelativeId"]
+                username = u["Name"]["Buffer"]
+
+                # Abrir usuario para obtener detalles
+                try:
+                    user_h_resp = samr.hSamrOpenUser(dce, dom_h,
+                                                     samr.USER_READ_GENERAL |
+                                                     samr.USER_READ_LOGON  |
+                                                     samr.USER_READ_ACCOUNT,
+                                                     rid)
+                    user_h = user_h_resp["UserHandle"]
+                    info   = samr.hSamrQueryInformationUser2(
+                        dce, user_h,
+                        samr.USER_ALL_INFORMATION,
+                    )["Buffer"]["All"]
+
+                    acb   = int(info["UserAccountControl"])
+                    full  = str(info["FullName"]["Buffer"]) if info["FullName"]["Buffer"] else ""
+                    desc  = str(info["AdminComment"]["Buffer"]) if info["AdminComment"]["Buffer"] else ""
+
+                    results.append({
+                        "rid":        rid,
+                        "username":   username,
+                        "full_name":  full,
+                        "description": desc,
+                        "acb_flags":  acb,
+                        "disabled":   bool(acb & samr.USER_ACCOUNT_DISABLED),
+                        "no_preauth": bool(acb & samr.USER_DONT_REQUIRE_PREAUTH),
+                        "no_pwd_exp": bool(acb & samr.USER_DONT_EXPIRE_PASSWORD),
+                    })
+                    samr.hSamrCloseHandle(dce, user_h)
+                except Exception:
+                    results.append({
+                        "rid": rid, "username": username,
+                        "full_name": "", "description": "",
+                        "acb_flags": 0, "disabled": False,
+                        "no_preauth": False, "no_pwd_exp": False,
+                    })
+
+                session_db.save_finding(
+                    self.target.ip, "RPC", "samr_user",
+                    "{} (RID={})".format(username, rid),
+                )
+
+            print_result("RPC", self.target.ip, "ok",
+                         "SAMR: {} usuarios encontrados".format(len(results)))
             return results
 
-        if results:
-            print_table(f"Resolucion de nombres en {self.target.ip}", ["Nombre", "SID", "Tipo"], results)
-            for name, sid, type_name in results:
-                session_db.save_finding(self.target.ip, "RPC", "lookup_name", f"{name} -> {sid} ({type_name})")
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SAMR get_users: {}".format(exc))
+            return []
 
-        return results
+    def get_groups(self):
+        """
+        Enumera grupos del dominio vía SAMR.
+
+        Retorna lista de dicts: {rid, name, member_count}
+        """
+        try:
+            dce = self._dce_samr()
+            _, dom_h, _, _ = self._samr_open_domain(dce)
+
+            resp = samr.hSamrEnumerateGroupsInDomain(dce, dom_h)
+            groups_raw = resp["Buffer"]["Buffer"]
+
+            results = []
+            for g in groups_raw:
+                rid  = g["RelativeId"]
+                name = g["Name"]["Buffer"]
+
+                # Intentar obtener número de miembros
+                member_count = 0
+                try:
+                    grp_h_resp = samr.hSamrOpenGroup(dce, dom_h,
+                                                     samr.GROUP_READ_INFORMATION |
+                                                     samr.GROUP_LIST_MEMBERS,
+                                                     rid)
+                    grp_h = grp_h_resp["GroupHandle"]
+                    members_resp = samr.hSamrGetMembersInGroup(dce, grp_h)
+                    member_count = members_resp["Members"]["MemberCount"]
+                    samr.hSamrCloseHandle(dce, grp_h)
+                except Exception:
+                    pass
+
+                results.append({
+                    "rid": rid, "name": name, "member_count": member_count,
+                })
+                session_db.save_finding(
+                    self.target.ip, "RPC", "samr_group",
+                    "{} (RID={}, {} miembros)".format(name, rid, member_count),
+                )
+
+            print_result("RPC", self.target.ip, "ok",
+                         "SAMR: {} grupos encontrados".format(len(results)))
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SAMR get_groups: {}".format(exc))
+            return []
+
+    def get_domain_info(self):
+        """
+        Información del dominio vía SAMR: nombre, SID, política de contraseñas.
+        """
+        try:
+            dce = self._dce_samr()
+            _, dom_h, domain_name, domain_sid = self._samr_open_domain(dce)
+
+            pwd_info = samr.hSamrQueryInformationDomain(
+                dce, dom_h, samr.DOMAIN_PASSWORD_INFORMATION
+            )["Buffer"]["Password"]
+
+            logon_info = samr.hSamrQueryInformationDomain(
+                dce, dom_h, samr.DOMAIN_LOGON_INFORMATION
+            )["Buffer"]["Logon"]
+
+            result = {
+                "domain_name":         domain_name,
+                "domain_sid":          domain_sid.formatCanonical(),
+                "min_pwd_length":      int(pwd_info["MinPasswordLength"]),
+                "pwd_history_length":  int(pwd_info["PasswordHistoryLength"]),
+                "lockout_threshold":   int(logon_info["LockoutThreshold"]),
+                "lockout_duration":    abs(int(logon_info["LockoutDuration"]["LowPart"])) // 600_000_000,
+                "max_pwd_age":         abs(int(pwd_info["MaxPasswordAge"]["LowPart"])) // 864_000_000_000,
+                "complexity_enabled":  bool(int(pwd_info["PasswordProperties"]) & 1),
+            }
+
+            session_db.save_finding(
+                self.target.ip, "RPC", "samr_domain_info",
+                "domain={} sid={}".format(domain_name, result["domain_sid"]),
+            )
+            return result
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SAMR get_domain_info: {}".format(exc))
+            return {}
+
+    def get_user_info(self, username):
+        """
+        Detalles de un usuario específico por nombre (vía SAMR).
+        """
+        try:
+            dce = self._dce_samr()
+            _, dom_h, _, _ = self._samr_open_domain(dce)
+
+            rid_resp = samr.hSamrLookupNamesInDomain(dce, dom_h, [username])
+            rid = rid_resp["RelativeIds"]["Element"][0]["Data"]
+
+            user_h_resp = samr.hSamrOpenUser(
+                dce, dom_h,
+                samr.USER_READ_GENERAL | samr.USER_READ_LOGON |
+                samr.USER_READ_ACCOUNT | samr.USER_READ_PREFERENCES,
+                rid,
+            )
+            user_h = user_h_resp["UserHandle"]
+            info   = samr.hSamrQueryInformationUser2(
+                dce, user_h, samr.USER_ALL_INFORMATION
+            )["Buffer"]["All"]
+            samr.hSamrCloseHandle(dce, user_h)
+
+            acb = int(info["UserAccountControl"])
+            return {
+                "rid":          rid,
+                "username":     username,
+                "full_name":    str(info["FullName"]["Buffer"]),
+                "description":  str(info["AdminComment"]["Buffer"]),
+                "acb_flags":    acb,
+                "disabled":     bool(acb & samr.USER_ACCOUNT_DISABLED),
+                "no_preauth":   bool(acb & samr.USER_DONT_REQUIRE_PREAUTH),
+                "no_pwd_exp":   bool(acb & samr.USER_DONT_EXPIRE_PASSWORD),
+                "bad_pwd_count": int(info["BadPasswordCount"]),
+                "logon_count":  int(info["LogonCount"]),
+            }
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SAMR get_user_info {}: {}".format(username, exc))
+            return {}
+
+    def enumerate_local_admins(self):
+        """
+        Enumera miembros del grupo Administrators local (RID 544) vía SAMR/BUILTIN.
+        """
+        try:
+            dce = self._dce_samr()
+            resp = samr.hSamrConnect(dce)
+            srv_h = resp["ServerHandle"]
+
+            # Abrir dominio BUILTIN
+            resp2 = samr.hSamrLookupDomainInSamServer(dce, srv_h, "Builtin")
+            builtin_sid = resp2["DomainId"]
+            resp3 = samr.hSamrOpenDomain(dce, srv_h, samr.DOMAIN_LOOKUP, builtin_sid)
+            builtin_h = resp3["DomainHandle"]
+
+            # RID 544 = Administrators
+            grp_h_resp = samr.hSamrOpenAlias(
+                dce, builtin_h, samr.ALIAS_LIST_MEMBERS, 544
+            )
+            grp_h = grp_h_resp["AliasHandle"]
+            members_resp = samr.hSamrGetMembersInAlias(dce, grp_h)
+
+            sids = [s.formatCanonical() for s in members_resp["Members"]["Sids"]]
+            # Resolver SIDs a nombres
+            names = self.lookup_sids(sids)
+
+            results = []
+            for sid_str, name_info in zip(sids, names):
+                results.append({"sid": sid_str, "name": name_info.get("name", sid_str)})
+                session_db.save_finding(
+                    self.target.ip, "RPC", "local_admin",
+                    name_info.get("name", sid_str),
+                )
+
+            print_result("RPC", self.target.ip, "pwned" if results else "ok",
+                         "Local Admins: {}".format(
+                             ", ".join(r["name"] for r in results) or "ninguno"))
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SAMR local_admins: {}".format(exc))
+            return []
+
+    # ==================================================================
+    # LSARPC — Local Security Authority Remote Protocol
+    # ==================================================================
+
+    def _lsa_open_policy(self, dce, desired_access=None):
+        if desired_access is None:
+            desired_access = (
+                lsad.POLICY_VIEW_LOCAL_INFORMATION |
+                lsad.POLICY_VIEW_AUDIT_INFORMATION |
+                lsad.POLICY_GET_PRIVATE_INFORMATION |
+                lsad.POLICY_LOOKUP_NAMES
+            )
+        resp = lsad.hLsarOpenPolicy2(dce, MAXIMUM_ALLOWED)
+        return resp["PolicyHandle"]
+
+    def get_lsa_domain_info(self):
+        """
+        Información del dominio vía LSA: nombre, SID, DNS domain.
+        """
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+
+            resp = lsad.hLsarQueryInformationPolicy2(
+                dce, pol_h, lsad.POLICY_DNS_DOMAIN_INFORMATION
+            )
+            info = resp["PolicyInformation"]["DnsDomainInfo"]
+
+            result = {
+                "dns_domain":    str(info["DnsDomainName"]["Buffer"]),
+                "netbios_name":  str(info["Name"]["Buffer"]),
+                "domain_guid":   info["DomainGuid"].formatCanonical() if hasattr(info["DomainGuid"], "formatCanonical") else "",
+                "domain_sid":    info["Sid"].formatCanonical() if info["Sid"] else "",
+            }
+            session_db.save_finding(
+                self.target.ip, "RPC", "lsa_domain_info",
+                "dns={} netbios={} sid={}".format(
+                    result["dns_domain"],
+                    result["netbios_name"],
+                    result["domain_sid"],
+                ),
+            )
+            return result
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA domain_info: {}".format(exc))
+            return {}
 
     def lookup_sids(self, sids):
         """
-        Resuelve una lista de SIDs ("S-1-5-21-...-1000") a nombres via
-        LSARPC. Equivalente a `rpcclient> lookupsids`, y a la tecnica de
-        RID cycling/bruteforce de lookupsid.py cuando se itera un rango
-        de RIDs sobre el mismo SID de dominio.
-        Devuelve una lista de tuplas (sid, nombre, tipo).
+        Resuelve una lista de SID strings a nombres de cuenta.
+        Retorna lista de dicts: {sid, name, domain, type}
         """
-        if not self._require_pipe("lsarpc"):
+        if not sids:
             return []
-
-        results = []
         try:
-            policy_handle = self._get_policy_handle()
-            try:
-                resp = lsat.hLsarLookupSids(self.dce, policy_handle, sids, lsat.LSAP_LOOKUP_LEVEL.LsapLookupWksta)
-            except DCERPCException as e:
-                if "STATUS_NONE_MAPPED" in str(e):
-                    print_result(self._proto(), self.target.ip, "info", "ningun SID pudo resolverse")
-                    return []
-                if "STATUS_SOME_NOT_MAPPED" not in str(e):
-                    raise
-                resp = e.get_packet()
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
 
-            domains = resp['ReferencedDomains']['Domains']
-            for sid, item in zip(sids, resp['TranslatedNames']['Names']):
-                if item['Use'] == SID_NAME_USE.SidTypeUnknown:
-                    continue
-                domain_name = str(domains[item['DomainIndex']]['Name'])
-                full_name = f"{domain_name}\\{item['Name']}"
-                type_name = SID_NAME_USE.enumItems(item['Use']).name
-                results.append((sid, full_name, type_name))
+            # Construir array de SIDs para impacket
+            from impacket.dcerpc.v5.dtypes import RPC_SID
+            sid_array = lsat.LSAPR_SID_ENUM_BUFFER()
+            sid_array["Entries"] = len(sids)
 
-        except Exception as e:
-            reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+            results = []
+            # impacket procesa los SIDs de 20 en 20 para evitar errores
+            chunk_size = 20
+            for chunk_start in range(0, len(sids), chunk_size):
+                chunk = sids[chunk_start: chunk_start + chunk_size]
+                try:
+                    resp = lsat.hLsarLookupSids(dce, pol_h, chunk)
+                    names     = resp["TranslatedNames"]["Names"]
+                    ref_doms  = resp["ReferencedDomains"]["Domains"]
+                    for i, sid_str in enumerate(chunk):
+                        if i < len(names):
+                            n = names[i]
+                            dom_idx = n["DomainIndex"]
+                            dom = ref_doms[dom_idx]["Name"]["Buffer"] if 0 <= dom_idx < len(ref_doms) else ""
+                            name = n["Name"]["Buffer"] if n["Name"]["Buffer"] else sid_str
+                            results.append({
+                                "sid":    sid_str,
+                                "name":   "{}\\{}".format(dom, name) if dom else name,
+                                "domain": dom,
+                                "type":   int(n["Use"]),
+                            })
+                        else:
+                            results.append({"sid": sid_str, "name": sid_str, "domain": "", "type": 0})
+                except Exception:
+                    for sid_str in chunk:
+                        results.append({"sid": sid_str, "name": sid_str, "domain": "", "type": 0})
             return results
 
-        if results:
-            print_table(f"Resolucion de SIDs en {self.target.ip}", ["SID", "Nombre", "Tipo"], results)
-            for sid, full_name, type_name in results:
-                session_db.save_finding(self.target.ip, "RPC", "lookup_sid", f"{sid} -> {full_name} ({type_name})")
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA lookup_sids: {}".format(exc))
+            return [{"sid": s, "name": s, "domain": "", "type": 0} for s in sids]
 
-        return results
+    def lookup_names(self, names):
+        """
+        Resuelve nombres de cuenta a SIDs.
+        Retorna lista de dicts: {name, sid, domain, type}
+        """
+        if not names:
+            return []
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+            resp  = lsat.hLsarLookupNames3(dce, pol_h, names)
+
+            ref_doms = resp["ReferencedDomains"]["Domains"]
+            sids_out = resp["TranslatedSids"]["Sids"]
+            results  = []
+            for i, name in enumerate(names):
+                if i < len(sids_out):
+                    s = sids_out[i]
+                    sid_str  = s["Sid"].formatCanonical() if s["Sid"] else ""
+                    dom_idx  = s["DomainIndex"]
+                    dom_name = ref_doms[dom_idx]["Name"]["Buffer"] if 0 <= dom_idx < len(ref_doms) else ""
+                    results.append({
+                        "name":   name,
+                        "sid":    sid_str,
+                        "domain": dom_name,
+                        "type":   int(s["Use"]),
+                    })
+                else:
+                    results.append({"name": name, "sid": "", "domain": "", "type": 0})
+            return results
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA lookup_names: {}".format(exc))
+            return []
+
+    def enumerate_privileges(self):
+        """
+        Enumera todos los privilegios definidos en el sistema.
+        Retorna lista de dicts: {name, luid, display_name, interesting}
+        """
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+            resp  = lsad.hLsarEnumeratePrivileges(dce, pol_h)
+            privs = resp["Privileges"]["Privilege"]
+
+            results = []
+            for p in privs:
+                name = str(p["Name"]["Buffer"])
+                results.append({
+                    "name":        name,
+                    "luid_high":   int(p["Luid"]["HighPart"]),
+                    "luid_low":    int(p["Luid"]["LowPart"]),
+                    "interesting": name in INTERESTING_PRIVS,
+                    "abuse_note":  INTERESTING_PRIVS.get(name, ""),
+                })
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA enumerate_privileges: {}".format(exc))
+            return []
+
+    def enumerate_accounts_with_privilege(self, priv_name):
+        """
+        Retorna qué cuentas tienen un privilegio dado (ej: SeDebugPrivilege).
+        """
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+            resp  = lsad.hLsarLookupPrivilegeValue(dce, pol_h, priv_name)
+            luid  = resp["Luid"]
+
+            resp2 = lsad.hLsarEnumerateAccountsWithUserRight(dce, pol_h, priv_name)
+            sids  = [s["Sid"].formatCanonical() for s in resp2["EnumerationBuffer"]["Information"]]
+
+            names = self.lookup_sids(sids)
+            results = [{"sid": s, "name": n.get("name", s)}
+                       for s, n in zip(sids, names)]
+
+            if results:
+                session_db.save_finding(
+                    self.target.ip, "RPC", "privilege_account",
+                    "{}: {}".format(priv_name,
+                                    ", ".join(r["name"] for r in results)),
+                )
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA accounts_with_priv {}: {}".format(priv_name, exc))
+            return []
+
+    def enumerate_trusted_domains(self):
+        """
+        Lista los dominios de confianza configurados vía LSA.
+        Retorna lista de dicts: {name, sid, direction, type}
+        """
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+
+            resp = lsad.hLsarEnumerateTrustedDomainsEx(dce, pol_h)
+            domains = resp["EnumerationBuffer"]["Information"]
+
+            results = []
+            for d in domains:
+                name = str(d["Name"]["Buffer"])
+                sid  = d["Sid"].formatCanonical() if d.get("Sid") else ""
+                direction = int(d.get("TrustDirection", 0))
+                trust_type = int(d.get("TrustType", 0))
+
+                dir_str = {1: "INBOUND", 2: "OUTBOUND", 3: "BIDIRECTIONAL"}.get(direction, str(direction))
+                type_str = {1: "DOWNLEVEL", 2: "UPLEVEL", 3: "MIT", 4: "DCE"}.get(trust_type, str(trust_type))
+
+                results.append({
+                    "name":      name,
+                    "sid":       sid,
+                    "direction": dir_str,
+                    "type":      type_str,
+                })
+                session_db.save_finding(
+                    self.target.ip, "RPC", "trust_domain",
+                    "{} ({}, {})".format(name, dir_str, type_str),
+                )
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA trusted_domains: {}".format(exc))
+            return []
+
+    def get_lsa_secrets(self):
+        """
+        Intenta volcar secretos LSA (requiere privilegios SYSTEM/DA).
+        Útil en post-explotación para extraer cuentas de servicio y credenciales cacheadas.
+        Retorna lista de dicts: {key_name, secret_bytes_hex}
+        """
+        try:
+            dce   = self._dce_lsarpc()
+            pol_h = self._lsa_open_policy(dce)
+
+            # Enumerar nombres de secretos
+            resp = lsad.hLsarEnumeratePrivateData(dce, pol_h)
+            secret_names = [str(s["Buffer"]) for s in resp["EnumerationBuffer"]["Information"]]
+
+            results = []
+            for name in secret_names:
+                try:
+                    resp2 = lsad.hLsarRetrievePrivateData(dce, pol_h, name)
+                    secret_bytes = bytes(resp2["EncryptedData"]["Buffer"])
+                    results.append({
+                        "key_name":          name,
+                        "secret_bytes_hex":  secret_bytes.hex(),
+                    })
+                    session_db.save_finding(
+                        self.target.ip, "RPC", "lsa_secret",
+                        "key={} bytes={}".format(name, len(secret_bytes)),
+                    )
+                except Exception:
+                    results.append({"key_name": name, "secret_bytes_hex": "(acceso denegado)"})
+
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "LSA get_secrets (requiere SYSTEM/DA): {}".format(exc))
+            return []
+
+    # ==================================================================
+    # SRVSVC — Server Service Remote Protocol
+    # ==================================================================
+
+    def get_server_info(self):
+        """
+        Información del servidor: nombre, OS, dominio, versión.
+        """
+        try:
+            dce  = self._dce_srvsvc()
+            resp = srvsvc.hNetrServerGetInfo(dce, 101)
+            info = resp["InfoStruct"]["ServerInfo101"]
+
+            result = {
+                "name":    str(info["sv101_name"]).rstrip("\x00"),
+                "comment": str(info["sv101_comment"]).rstrip("\x00"),
+                "platform": int(info["sv101_platform_id"]),
+                "version":  "{}.{}".format(
+                    int(info["sv101_version_major"]),
+                    int(info["sv101_version_minor"]),
+                ),
+            }
+            session_db.save_finding(
+                self.target.ip, "RPC", "server_info",
+                "name={} version={}".format(result["name"], result["version"]),
+            )
+            return result
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SRVSVC server_info: {}".format(exc))
+            return {}
+
+    def get_active_sessions(self):
+        """
+        Enumera sesiones activas en el servidor (quién está conectado).
+        Retorna lista de dicts: {user, client, time, idle_time}
+        """
+        try:
+            dce  = self._dce_srvsvc()
+            resp = srvsvc.hNetrSessionEnum(dce, NULL, NULL, 10)
+            sessions_raw = resp["InfoStruct"]["SessionInfo"]["Level10"]["Buffer"]
+
+            results = []
+            for s in sessions_raw:
+                user   = str(s["sesi10_username"]).rstrip("\x00")
+                client = str(s["sesi10_cname"]).rstrip("\x00").lstrip("\\")
+                time_s = int(s["sesi10_time"])
+                idle_s = int(s["sesi10_idle_time"])
+
+                results.append({
+                    "user":       user,
+                    "client":     client,
+                    "time_min":   time_s // 60,
+                    "idle_min":   idle_s // 60,
+                })
+                session_db.save_finding(
+                    self.target.ip, "RPC", "active_session",
+                    "{}@{} ({}min)".format(user, client, time_s // 60),
+                )
+
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SRVSVC active_sessions: {}".format(exc))
+            return []
+
+    def get_shares(self):
+        """
+        Enumera shares vía SRVSVC (nivel 502: incluye permisos).
+        """
+        try:
+            dce  = self._dce_srvsvc()
+            resp = srvsvc.hNetrShareEnum(dce, 1)
+            shares_raw = resp["InfoStruct"]["ShareInfo"]["Level1"]["Buffer"]
+
+            results = []
+            for s in shares_raw:
+                name    = str(s["shi1_netname"]).rstrip("\x00")
+                comment = str(s["shi1_remark"]).rstrip("\x00")
+                stype   = int(s["shi1_type"])
+                results.append({
+                    "name":    name,
+                    "comment": comment,
+                    "type":    stype,
+                })
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SRVSVC get_shares: {}".format(exc))
+            return []
+
+    def get_open_files(self):
+        """
+        Enumera ficheros abiertos en el servidor.
+        Retorna lista de dicts: {file_id, user, path, permissions, num_locks}
+        """
+        try:
+            dce  = self._dce_srvsvc()
+            resp = srvsvc.hNetrFileEnum(dce, NULL, NULL, 3)
+            files_raw = resp["InfoStruct"]["FileInfo"]["Level3"]["Buffer"]
+
+            results = []
+            for f in files_raw:
+                results.append({
+                    "file_id":    int(f["fi3_id"]),
+                    "user":       str(f["fi3_username"]).rstrip("\x00"),
+                    "path":       str(f["fi3_pathname"]).rstrip("\x00"),
+                    "permissions":int(f["fi3_permissions"]),
+                    "num_locks":  int(f["fi3_num_locks"]),
+                })
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SRVSVC open_files: {}".format(exc))
+            return []
+
+    # ==================================================================
+    # WKSSVC — Workstation Service Remote Protocol
+    # ==================================================================
+
+    def get_workstation_info(self):
+        """
+        Información de la workstation: nombre, dominio, versión OS.
+        """
+        try:
+            dce  = self._dce_wkssvc()
+            resp = wkst.hNetrWkstaGetInfo(dce, 100)
+            info = resp["WkstaInfo"]["WkstaInfo100"]
+
+            result = {
+                "computer_name": str(info["wki100_computername"]).rstrip("\x00"),
+                "lan_group":     str(info["wki100_langroup"]).rstrip("\x00"),
+                "version_major": int(info["wki100_ver_major"]),
+                "version_minor": int(info["wki100_ver_minor"]),
+                "platform_id":   int(info["wki100_platform_id"]),
+            }
+            session_db.save_finding(
+                self.target.ip, "RPC", "wks_info",
+                "name={} domain={} v{}.{}".format(
+                    result["computer_name"], result["lan_group"],
+                    result["version_major"], result["version_minor"],
+                ),
+            )
+            return result
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "WKSSVC workstation_info: {}".format(exc))
+            return {}
+
+    def get_logged_on_users(self):
+        """
+        Enumera usuarios con sesión interactiva activa en la máquina.
+        """
+        try:
+            dce  = self._dce_wkssvc()
+            resp = wkst.hNetrWkstaUserEnum(dce, 1)
+            users_raw = resp["UserInfo"]["WkstaUserInfo"]["Level1"]["Buffer"]
+
+            results = []
+            for u in users_raw:
+                username = str(u["wkui1_username"]).rstrip("\x00")
+                logon_domain = str(u["wkui1_logon_domain"]).rstrip("\x00")
+                oth_domains  = str(u["wkui1_oth_domains"]).rstrip("\x00")
+                logon_server = str(u["wkui1_logon_server"]).rstrip("\x00")
+
+                results.append({
+                    "username":    username,
+                    "domain":      logon_domain,
+                    "oth_domains": oth_domains,
+                    "logon_server":logon_server,
+                })
+                session_db.save_finding(
+                    self.target.ip, "RPC", "logged_on_user",
+                    "{}\\{}".format(logon_domain, username),
+                )
+
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "WKSSVC logged_on_users: {}".format(exc))
+            return []
+
+    # ==================================================================
+    # SVCCTL — Service Control Manager Remote Protocol
+    # ==================================================================
+
+    def _scm_open(self, dce):
+        resp = scmr.hROpenSCManagerW(dce)
+        return resp["lpScHandle"]
+
+    def list_services(self):
+        """
+        Enumera servicios del sistema vía SCM.
+        Retorna lista de dicts: {name, display_name, state, start_type, binary_path}
+        """
+        try:
+            dce   = self._dce_svcctl()
+            scm_h = self._scm_open(dce)
+
+            resp  = scmr.hREnumServicesStatusW(
+                dce, scm_h,
+                scmr.SERVICE_WIN32,
+                scmr.SERVICE_STATE_ALL,
+            )
+            results = []
+            for svc in resp:
+                name      = str(svc["lpServiceName"])
+                disp_name = str(svc["lpDisplayName"])
+                state     = SERVICE_STATE.get(
+                    int(svc["ServiceStatus"]["dwCurrentState"]), "UNKNOWN"
+                )
+                results.append({
+                    "name":         name,
+                    "display_name": disp_name,
+                    "state":        state,
+                    "binary_path":  "",  # necesita query individual
+                })
+
+            scmr.hRCloseServiceHandle(dce, scm_h)
+            return results
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SCM list_services: {}".format(exc))
+            return []
+
+    def create_service(self, name, display_name, binary_path):
+        """
+        Crea un servicio en el SCM remoto.
+        Retorna el handle del servicio creado, o None si falla.
+        """
+        try:
+            dce   = self._dce_svcctl()
+            scm_h = self._scm_open(dce)
+
+            resp  = scmr.hRCreateServiceW(
+                dce, scm_h,
+                name, display_name,
+                lpBinaryPathName=binary_path,
+                dwServiceType=scmr.SERVICE_WIN32_OWN_PROCESS,
+                dwStartType=scmr.SERVICE_DEMAND_START,
+                dwErrorControl=scmr.SERVICE_ERROR_IGNORE,
+            )
+            svc_h = resp["lpServiceHandle"]
+            print_result("RPC", self.target.ip, "ok",
+                         "servicio '{}' creado".format(name))
+            scmr.hRCloseServiceHandle(dce, scm_h)
+            return svc_h
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SCM create_service: {}".format(exc))
+            return None
+
+    def start_service(self, name):
+        """Arranca un servicio por nombre."""
+        try:
+            dce   = self._dce_svcctl()
+            scm_h = self._scm_open(dce)
+            resp  = scmr.hROpenServiceW(dce, scm_h, name)
+            svc_h = resp["lpServiceHandle"]
+            try:
+                scmr.hRStartServiceW(dce, svc_h)
+                print_result("RPC", self.target.ip, "ok",
+                             "servicio '{}' arrancado".format(name))
+                return True
+            finally:
+                scmr.hRCloseServiceHandle(dce, svc_h)
+                scmr.hRCloseServiceHandle(dce, scm_h)
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SCM start_service '{}': {}".format(name, exc))
+            return False
+
+    def stop_service(self, name):
+        """Para un servicio por nombre."""
+        try:
+            dce   = self._dce_svcctl()
+            scm_h = self._scm_open(dce)
+            resp  = scmr.hROpenServiceW(dce, scm_h, name)
+            svc_h = resp["lpServiceHandle"]
+            try:
+                scmr.hRControlService(dce, svc_h, scmr.SERVICE_CONTROL_STOP)
+                print_result("RPC", self.target.ip, "ok",
+                             "servicio '{}' detenido".format(name))
+                return True
+            finally:
+                scmr.hRCloseServiceHandle(dce, svc_h)
+                scmr.hRCloseServiceHandle(dce, scm_h)
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SCM stop_service '{}': {}".format(name, exc))
+            return False
+
+    def delete_service(self, name):
+        """Elimina un servicio por nombre."""
+        try:
+            dce   = self._dce_svcctl()
+            scm_h = self._scm_open(dce)
+            resp  = scmr.hROpenServiceW(dce, scm_h, name)
+            svc_h = resp["lpServiceHandle"]
+            try:
+                scmr.hRDeleteService(dce, svc_h)
+                print_result("RPC", self.target.ip, "ok",
+                             "servicio '{}' eliminado".format(name))
+                return True
+            finally:
+                scmr.hRCloseServiceHandle(dce, svc_h)
+                scmr.hRCloseServiceHandle(dce, scm_h)
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "SCM delete_service '{}': {}".format(name, exc))
+            return False
+
+    def exec_via_service(self, command, svc_name="LobSvc"):
+        """
+        Ejecución remota de comandos vía SCM: create → start → delete.
+
+        command: comando a ejecutar (ej: 'cmd.exe /c whoami > C:\\out.txt')
+        svc_name: nombre temporal del servicio (default: LobSvc)
+
+        Retorna True si el servicio se arrancó correctamente.
+        NOTA: el proceso arranca como SYSTEM pero no hay retorno de output.
+        Usa 'cmd.exe /c <cmd> > C:\\Windows\\Temp\\out.txt' y luego descarga
+        el fichero vía SMB.
+        """
+        print_result("RPC", self.target.ip, "info",
+                     "exec_via_service: '{}'".format(command))
+        created = self.create_service(svc_name, svc_name, command)
+        if not created:
+            return False
+
+        ok = self.start_service(svc_name)
+        time.sleep(1)  # Dar tiempo al servicio a ejecutar
+        self.stop_service(svc_name)
+        self.delete_service(svc_name)
+
+        if ok:
+            session_db.save_finding(
+                self.target.ip, "RPC", "exec_via_service",
+                "cmd={}".format(command[:100]),
+            )
+        return ok
+
+    # ==================================================================
+    # WINREG — Windows Registry Remote Protocol
+    # ==================================================================
+
+    def reg_query(self, hive, key, value):
+        """
+        Lee un valor del registro remoto.
+        hive: "HKLM" | "HKCU" | "HKCR" | "HKU", o su valor numérico
+        key:  ruta al key (ej: "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion")
+        value: nombre del valor (ej: "ProductName")
+        Retorna (data_type, data) o (None, None) si falla.
+        """
+        try:
+            dce     = self._dce_winreg()
+            hive_id = HIVE_NAMES.get(str(hive).upper(), hive) if isinstance(hive, str) else hive
+
+            ans = rrp.hOpenClassesRoot(dce) if hive_id == HKCR else \
+                  rrp.hOpenLocalMachine(dce) if hive_id == HKLM else \
+                  rrp.hOpenCurrentUser(dce) if hive_id == HKCU else \
+                  rrp.hOpenUsers(dce)
+
+            root_h = ans["phKey"]
+            try:
+                key_h_resp = rrp.hBaseRegOpenKey(dce, root_h, key)
+                key_h      = key_h_resp["phkResult"]
+                try:
+                    val_resp = rrp.hBaseRegQueryValue(dce, key_h, value)
+                    data_type = int(val_resp["pdwType"])
+                    data      = val_resp["pvData"]
+                    return data_type, data
+                finally:
+                    rrp.hBaseRegCloseKey(dce, key_h)
+            finally:
+                rrp.hBaseRegCloseKey(dce, root_h)
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "WINREG query {}\\{}\\{}: {}".format(hive, key, value, exc))
+            return None, None
+
+    def reg_enum_keys(self, hive, key):
+        """
+        Enumera subkeys de una clave de registro remota.
+        Retorna lista de nombres de subkey.
+        """
+        try:
+            dce     = self._dce_winreg()
+            hive_id = HIVE_NAMES.get(str(hive).upper(), hive) if isinstance(hive, str) else hive
+
+            ans = rrp.hOpenLocalMachine(dce) if hive_id == HKLM else rrp.hOpenUsers(dce)
+            root_h = ans["phKey"]
+            try:
+                key_h_resp = rrp.hBaseRegOpenKey(dce, root_h, key)
+                key_h      = key_h_resp["phkResult"]
+                try:
+                    subkeys = []
+                    idx = 0
+                    while True:
+                        try:
+                            resp = rrp.hBaseRegEnumKey(dce, key_h, idx)
+                            subkeys.append(str(resp["lpNameOut"]).rstrip("\x00"))
+                            idx += 1
+                        except DCERPCException:
+                            break
+                    return subkeys
+                finally:
+                    rrp.hBaseRegCloseKey(dce, key_h)
+            finally:
+                rrp.hBaseRegCloseKey(dce, root_h)
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "WINREG enum_keys {}\\{}: {}".format(hive, key, exc))
+            return []
+
+    def reg_enum_values(self, hive, key):
+        """
+        Enumera valores de una clave de registro remota.
+        Retorna lista de dicts: {name, type, data}
+        """
+        try:
+            dce     = self._dce_winreg()
+            hive_id = HIVE_NAMES.get(str(hive).upper(), hive) if isinstance(hive, str) else hive
+
+            ans    = rrp.hOpenLocalMachine(dce) if hive_id == HKLM else rrp.hOpenUsers(dce)
+            root_h = ans["phKey"]
+            try:
+                key_h_resp = rrp.hBaseRegOpenKey(dce, root_h, key)
+                key_h      = key_h_resp["phkResult"]
+                try:
+                    values = []
+                    idx = 0
+                    while True:
+                        try:
+                            resp = rrp.hBaseRegEnumValue(dce, key_h, idx)
+                            values.append({
+                                "name": str(resp["lpValueNameOut"]).rstrip("\x00"),
+                                "type": int(resp["lpType"]),
+                                "data": bytes(resp["lpData"]),
+                            })
+                            idx += 1
+                        except DCERPCException:
+                            break
+                    return values
+                finally:
+                    rrp.hBaseRegCloseKey(dce, key_h)
+            finally:
+                rrp.hBaseRegCloseKey(dce, root_h)
+
+        except DCERPCException as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "WINREG enum_values {}\\{}: {}".format(hive, key, exc))
+            return []
+
+    # ==================================================================
+    # EPM — Endpoint Mapper
+    # ==================================================================
+
+    def enumerate_endpoints(self):
+        """
+        Enumera los endpoints RPC registrados en el sistema.
+        Retorna lista de dicts: {uuid, annotation, address, protocol}
+        """
+        try:
+            entries = epm.hept_lookup(self.target.ip)
+            results = []
+            for entry in entries:
+                results.append({
+                    "uuid":       str(entry["tower"]["Floors"][0]),
+                    "annotation": str(entry.get("annotation", "")),
+                    "address":    str(entry["tower"]["Floors"][-1]) if len(entry["tower"]["Floors"]) > 1 else "",
+                })
+            session_db.save_finding(
+                self.target.ip, "RPC", "epm_endpoints",
+                "{} endpoints".format(len(results)),
+            )
+            return results
+        except Exception as exc:
+            print_result("RPC", self.target.ip, "fail",
+                         "EPM enumerate: {}".format(exc))
+            return []

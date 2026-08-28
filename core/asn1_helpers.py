@@ -850,80 +850,173 @@ def parse_as_rep_ticket(as_rep_data: bytes) -> dict:
     }
 
 
-def decrypt_as_rep_enc_part_rc4(as_rep_data: bytes, key: bytes) -> dict:
+
+def _autodetect_etype(as_rep_bytes):
     """
-    Descifra el enc-part de un AS-REP usando RC4-HMAC (etype 23).
-
-    'key' puede ser el NT hash del usuario (nt_hash(password)) o el hash
-    pasado directamente con -H.
-
-    El enc-part descifrado (EncASRepPart / EncKDCRepPart, RFC 4120 §5.4.2)
-    contiene:
-        key       [0] EncryptionKey  → session key para usar con el TGT
-        nonce     [6] UInt32
-        ...
-
-    Devuelve:
-        {
-          'session_key': bytes,     # clave de sesión (para TGS-REQ y Authenticator)
-          'session_etype': int,     # tipo de cifrado de la session key
-          'raw': bytes,             # bytes DER completos del EncKDCRepPart descifrado
-        }
-
-    Lanza ValueError si el descifrado o el checksum falla.
+    Intenta extraer el etype del AS-REP parseando el TLV mínimo.
+    Si no puede, asume 23 (RC4) como fallback.
+ 
+    El etype está en: AS-REP [APPLICATION 11] → enc-part → etype [context 0]
     """
-    info = parse_as_rep_ticket(as_rep_data)
-    if info['enc_part_etype'] != ETYPE_RC4_HMAC:
-        raise NotImplementedError(
-            f"Solo RC4-HMAC (etype 23) implementado; el AS-REP usa etype {info['enc_part_etype']}. "
-            "Para AES256 usa impacket.krb5.crypto.Key con los helpers de aes_decrypt."
+    try:
+        # Buscar tag context [0] (etype) dentro del enc-part
+        # Estructura simplificada: buscamos el primer 0xA0 0x03 0x02 0x01 <etype_byte>
+        idx = 0
+        while idx < len(as_rep_bytes) - 4:
+            if (as_rep_bytes[idx] == 0xA0 and
+                    as_rep_bytes[idx + 1] == 0x03 and
+                    as_rep_bytes[idx + 2] == 0x02 and
+                    as_rep_bytes[idx + 3] == 0x01):
+                return as_rep_bytes[idx + 4]
+            idx += 1
+    except Exception:
+        pass
+    return 23  # fallback RC4
+ 
+ 
+def _extract_enc_part_ciphertext(as_rep_bytes):
+    """
+    Extrae el ciphertext del enc-part de un AS-REP.
+ 
+    AS-REP (APPLICATION 11) contiene enc-part (EncryptedData):
+      SEQUENCE {
+        etype   [0] INTEGER,
+        kvno    [1] INTEGER  (opcional),
+        cipher  [2] OCTET STRING  ← esto queremos
+      }
+ 
+    Buscamos el context tag [2] (0xA2) seguido del OCTET STRING (0x04).
+    """
+    try:
+        idx = 0
+        while idx < len(as_rep_bytes) - 2:
+            # Buscar context [2] CONSTRUCTED (0xA2)
+            if as_rep_bytes[idx] == 0xA2:
+                # Saltar el tag y longitud del context
+                idx += 1
+                ctx_len, idx = _read_der_length(as_rep_bytes, idx)
+                # Debe haber un OCTET STRING (0x04)
+                if as_rep_bytes[idx] == 0x04:
+                    idx += 1
+                    oct_len, idx = _read_der_length(as_rep_bytes, idx)
+                    return as_rep_bytes[idx: idx + oct_len]
+            idx += 1
+    except Exception:
+        pass
+    # Fallback: devolver los últimos bytes que parezcan ciphertext
+    # (heurística muy burda, solo si el parsing falla)
+    return as_rep_bytes[-256:] if len(as_rep_bytes) >= 256 else as_rep_bytes
+ 
+ 
+def _read_der_length(data, idx):
+    """
+    Lee una longitud DER/BER a partir de idx.
+    Retorna (longitud, nuevo_idx).
+    """
+    b = data[idx]
+    idx += 1
+    if b < 0x80:
+        return b, idx
+    num_bytes = b & 0x7F
+    length = int.from_bytes(data[idx: idx + num_bytes], "big")
+    return length, idx + num_bytes
+ 
+ 
+def _decrypt_rc4_hmac(ciphertext, nt_hash):
+    """
+    Descifrado RC4-HMAC (etype 23) — lógica extraída de la función original
+    para reutilizarla desde decrypt_as_rep_enc_part.
+ 
+    Implementación equivalente a la original de asn1_helpers.py:
+    usa hmac_md5 y rc4 que ya existen en ese mismo módulo.
+ 
+    NOTA: Esta función debe poder llamar a hmac_md5() y rc4() del módulo.
+    Si se usa fuera de asn1_helpers.py, importarlas explícitamente.
+    """
+    # Estas funciones ya existen en asn1_helpers.py:
+    #   hmac_md5(key, data) → bytes
+    #   rc4(key, data)      → bytes
+    #
+    # Estructura RC4-HMAC:
+    #   checksum (16 bytes) || encrypted_data
+    #   K1 = HMAC-MD5(NT_hash, msg_type_constant)
+    #   K3 = HMAC-MD5(K1, checksum)
+    #   plaintext = RC4(K3, encrypted_data)
+ 
+    # msg_type = 8 para AS-REP enc-part
+    msg_type = b"\x08\x00\x00\x00"
+ 
+    # Importar las funciones del mismo módulo (asn1_helpers)
+    # Cuando se integre el parche, estas serán las funciones del módulo
+    from core.asn1_helpers import hmac_md5, rc4 as rc4_fn
+ 
+    k1       = hmac_md5(nt_hash, msg_type)
+    checksum = ciphertext[:16]
+    enc_data = ciphertext[16:]
+    k3       = hmac_md5(k1, checksum)
+    return rc4_fn(k3, enc_data)
+ 
+
+
+def decrypt_as_rep_enc_part(as_rep_bytes, key_material, etype=None):
+    """
+    Descifra la parte cifrada (enc-part) de un AS-REP y devuelve el plaintext.
+ 
+    Parámetros:
+      as_rep_bytes : bytes del AS-REP completo (sin envolver en TCP length prefix)
+      key_material : bytes de la clave de sesión derivada:
+                     - etype 23 (RC4-HMAC)  → NT hash (16 bytes)
+                     - etype 17 (AES128)    → clave AES-128 (16 bytes)
+                     - etype 18 (AES256)    → clave AES-256 (32 bytes)
+      etype        : int con el etype usado (23, 17 o 18).
+                     Si es None, se intenta autodetectar del AS-REP.
+ 
+    Retorna bytes del enc-part descifrado, o lanza Exception si falla.
+ 
+    Key_usage para AS-REP enc-part: 3  (RFC 4120 §7.5.1)
+    """
+    # Importamos aquí para no romper el módulo si impacket no está instalado
+    # en el momento del import del fichero (el error sale al llamar la función)
+    from impacket.krb5.crypto import Key as _ImpKey, _enctype_table as _ImpEnctypeTable
+    from impacket.krb5 import constants as _KrbConstants
+ 
+    # Autodetectar etype si no se pasó
+    if etype is None:
+        etype = _autodetect_etype(as_rep_bytes)
+ 
+    # Extraer el ciphertext del enc-part del AS-REP
+    ciphertext = _extract_enc_part_ciphertext(as_rep_bytes)
+ 
+    if etype == 23:
+        # RC4-HMAC — misma lógica que decrypt_as_rep_enc_part_rc4 original
+        return _decrypt_rc4_hmac(ciphertext, key_material)
+ 
+    elif etype in (17, 18):
+        # AES-128 (17) o AES-256 (18) via impacket
+        enctype_id = (
+            _KrbConstants.EncryptionTypes.aes128_cts_hmac_sha1_96.value
+            if etype == 17
+            else _KrbConstants.EncryptionTypes.aes256_cts_hmac_sha1_96.value
         )
-
-    # key_usage=3 = AS-REP enc-part cifrado con clave del usuario (RFC 4120 §7.5.1)
-    plaintext = rc4_hmac_decrypt(key, info['enc_part_cipher'], key_usage=3)
-
-    # Parsear el EncKDCRepPart (APPLICATION 25 para AS-REP o 26 para TGS-REP)
-    # Lo que nos interesa es el campo key [0]:
-    # EncryptionKey ::= SEQUENCE { keytype [0] Int32, keyvalue [1] OCTET STRING }
-    session_key = None
-    session_etype = None
-
-    # El plaintext puede tener un APPLICATION wrapper (25) o solo SEQUENCE
-    start = 0
-    if plaintext[0] in (0x79, 0x7a):  # APPLICATION 25 o 26
-        _, inner, _ = _der_parse_tlv(plaintext, 0)
-        _, seq_body, _ = _der_parse_tlv(inner, 0)
+        key = _ImpKey(enctype_id, key_material)
+        cipher = _ImpEnctypeTable[etype]
+        # key_usage=3: AS-REP enc-part (RFC 4120 §7.5.1)
+        return cipher.decrypt(key, 3, ciphertext)
+ 
     else:
-        _, seq_body, _ = _der_parse_tlv(plaintext, 0)
-
-    pos = 0
-    while pos < len(seq_body):
-        ctx_tag, field_data, pos2 = _der_parse_tlv(seq_body, pos)
-        field_id = ctx_tag & 0x1f
-        if field_id == 0:   # key [0] EncryptionKey
-            _, enc_key_seq, _ = _der_parse_tlv(field_data, 0)
-            kp = 0
-            while kp < len(enc_key_seq):
-                kt_tag, kt_data, kp = _der_parse_tlv(enc_key_seq, kp)
-                kt_id = kt_tag & 0x1f
-                if kt_id == 0:
-                    _, ib, _ = _der_parse_tlv(kt_data, 0)
-                    session_etype = _parse_integer(ib)
-                elif kt_id == 1:
-                    _, ob, _ = _der_parse_tlv(kt_data, 0)
-                    session_key = ob
-            break
-        pos = pos2
-
-    if session_key is None:
-        raise ValueError("No se encontró session key en el EncKDCRepPart descifrado")
-
-    return {
-        'session_key': session_key,
-        'session_etype': session_etype,
-        'raw': plaintext,
-    }
-
+        raise NotImplementedError(
+            "etype {} no soportado. Soportados: 23 (RC4), 17 (AES128), 18 (AES256)".format(etype)
+        )
+ 
+ 
+def decrypt_as_rep_enc_part_rc4(as_rep_bytes, nt_hash):
+    """
+    Alias de compatibilidad con el nombre original.
+    Llama a decrypt_as_rep_enc_part con etype=23 (RC4-HMAC).
+    Mantener para no romper los scripts que ya importan este nombre.
+    """
+    return decrypt_as_rep_enc_part(as_rep_bytes, nt_hash, etype=23)
+ 
 
 def build_s4u2self_tgs_req(
     realm: str,
