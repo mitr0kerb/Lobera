@@ -406,29 +406,10 @@ def build_parser():
     )
 
     
-    # ---- Kerberos ----
-    krb = subs.add_parser("kerberos", help="Scripts Kerberos")
-    add_common_args(krb); _add_script_args(krb)
-    krb.add_argument("--userlist",         default=None, metavar="FILE")
-    krb.add_argument("--spn",              default=None)
-    krb.add_argument("--kirbi",            default=None, metavar="FILE")
-    krb.add_argument("--krbtgt-hash",      default=None, dest="krbtgt_hash")
-    krb.add_argument("--service-hash",     default=None, dest="service_hash")
-    krb.add_argument("--domain-sid",       default=None, dest="domain_sid")
-    krb.add_argument("--user-id",          type=int, default=500, dest="user_id")
-    krb.add_argument("--groups",           default="513,512,520,518,519")
-    krb.add_argument("--target-user",      default=None, dest="target_user")
-    krb.add_argument("--target-computer",  default=None, dest="target_computer")
-    krb.add_argument("--attacker-account", default=None, dest="attacker_account")
-    krb.add_argument("--cert",             default=None)
-    krb.add_argument("--pfx",             default=None)
-    krb.add_argument("--template",         default=None)
-    krb.add_argument("--ca",              default=None)
-    krb.add_argument("--alt-name",         default=None, dest="alt_name")
-    krb.add_argument("--dc-name",          default=None, dest="dc_name")
-    krb.add_argument("--user-sid",         default=None, dest="user_sid")
-    krb.add_argument("--vector",           default=None,
-                     choices=["dos","downgrade","spnjack"])
+        # ---- Kerberos ----
+    krb = subs.add_parser("kerberos", help="Consola interactiva de scripts Kerberos")
+    krb.add_argument("--scanner", action="store_true",
+                     help="Modo autopwn interactivo Kerberos")
 
     # ---- RPC ----
     rpc = subs.add_parser("rpc", help="Scripts RPC (SAMR, LSA, SCM, WINREG…)")
@@ -456,36 +437,9 @@ def build_parser():
     rpc.add_argument("--out-dir",          default=None, dest="out_dir")
 
     # ---- LDAP ----
-    ldap = subs.add_parser("ldap", help="Scripts LDAP")
-    add_common_args(ldap); _add_script_args(ldap)
-    ldap.add_argument("--shell",              action="store_true",
-                      help="Abre la consola interactiva LDAP")
-    ldap.add_argument("--ldaps",              action="store_true")
-    ldap.add_argument("--port",               type=int, default=None)
-    ldap.add_argument("--filter-flag",        default=None, dest="filter_flag")
-    ldap.add_argument("--enabled-only",       action="store_true", dest="enabled_only")
-    ldap.add_argument("--privileged-only",    action="store_true", dest="privileged_only")
-    ldap.add_argument("--undeleg",            action="store_true")
-    ldap.add_argument("--os-filter",          default=None, dest="os_filter")
-    ldap.add_argument("--target-dn",          default=None, dest="target_dn")
-    ldap.add_argument("--out-dir",            default=None, dest="out_dir")
-    ldap.add_argument("--save-list",          default=None, dest="save_list")
-    ldap.add_argument("--userlist",           default=None, metavar="FILE")
-    ldap.add_argument("--delay",              type=float, default=0)
-    ldap.add_argument("--continue-on-lockout",action="store_true",
-                      dest="continue_on_lockout")
-    ldap.add_argument("--action",             default=None,
-                      choices=["detect","reset-password","add-member",
-                               "write-dacl","shadow-creds","rbcd"])
-    ldap.add_argument("--source-user",        default=None, dest="source_user")
-    ldap.add_argument("--target-obj",         default=None, dest="target_obj")
-    ldap.add_argument("--new-password",       default=None, dest="new_password")
-    ldap.add_argument("--save-key",           default=None, dest="save_key")
-    ldap.add_argument("--mode",               default=None,
-                      choices=["add-da","rbcd","dump","shadow-creds"])
-    ldap.add_argument("--relay-target-user",  default="TARGET_USER",
-                      dest="relay_target_user")
-    ldap.add_argument("--attacker-ip",        default=None, dest="attacker_ip")
+    ldap = subs.add_parser("ldap", help="Consola interactiva de scripts LDAP")
+    ldap.add_argument("--scanner", action="store_true",
+                      help="Modo autopwn interactivo LDAP")
 
     # ---- WinRM ----
     winrm = subs.add_parser("winrm", help="Scripts WinRM / PowerShell remoto")
@@ -542,10 +496,13 @@ def run_smb(args):
     from modules.smb_script_shell import SMBScriptShell
     SMBScriptShell(_ROOT).run()
 
-
-
 def run_kerberos(args):
-    run_module_generic("kerberos", args)
+    if getattr(args, "scanner", False):
+        from scripts.kerberos.scanner import run_kerberos_scanner
+        run_kerberos_scanner(args)
+        return
+    from modules.kerberos_script_shell import KerberosScriptShell
+    KerberosScriptShell(_ROOT).run()
 
 
 def run_rpc(args):
@@ -557,13 +514,12 @@ def run_rpc(args):
 
 
 def run_ldap(args):
-    if getattr(args, "shell", False):
-        from modules.ldap_shell import LDAPShell
-        LDAPShell(make_target(args), make_creds(args),
-                  use_ssl=getattr(args,"ldaps",False),
-                  port=getattr(args,"port",None)).run()
+    if getattr(args, "scanner", False):
+        from scripts.ldap.scanner import run_ldap_scanner
+        run_ldap_scanner(args)
         return
-    run_module_generic("ldap", args)
+    from modules.ldap_script_shell import LDAPScriptShell
+    LDAPScriptShell(_ROOT).run()
 
 
 def run_winrm(args):
