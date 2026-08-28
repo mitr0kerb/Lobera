@@ -113,6 +113,19 @@ class SMBModule:
             print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
             return False
 
+    def disconnect(self):
+            """Cierra la conexión SMB si está activa."""
+            if self.conn is not None:
+                try:
+                    self.conn.logoff()
+                except Exception:
+                    pass
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                self.conn = None
+
     def is_null_session(self):
         """
         Comprueba si el objetivo permite null session, sin usar
@@ -264,97 +277,130 @@ class SMBModule:
             print_result(self._proto(), self.target.ip, "fail", f"error descargando {remote_path}: [bold white]{reason}[/bold white]")
             return False
 
-    def spider_share(self, share_name, path="", extensions=_USE_DEFAULT, keywords=None, max_depth=5, _depth=0):
-        """
-        Recorre recursivamente un share y descarga automáticamente los
-        ficheros que coincidan con una extensión o palabra clave.
+        def spider_share(self, share_name, path="", extensions=_USE_DEFAULT, keywords=None,
+                     max_depth=5, _depth=0, confirm=False):
+            """
+            Recorre recursivamente un share. Si confirm=True (por defecto desde
+            los scripts), muestra los ficheros encontrados y pide confirmación
+            antes de descargar. Si confirm=False, descarga automáticamente.
+            """
+            if extensions is _USE_DEFAULT:
+                extensions = DEFAULT_SPIDER_EXTENSIONS
+            elif extensions is None:
+                extensions = []
 
-        extensions:
-            - No se especifica -> usa DEFAULT_SPIDER_EXTENSIONS
-            - [] (lista vacía explícita) -> no descarga por extensión, solo por keyword
-            - [".foo", ".bar"] -> usa exactamente esas extensiones
-        keywords: lista de palabras a buscar en el nombre del fichero, ej: ["password", "backup"]
-        max_depth: profundidad máxima de recursión, para no perderse en árboles gigantes.
+            if _depth == 0:
+                ext_info = f"{len(extensions)} extensión(es)" if extensions else "sin filtro de extensión"
+                print_result(self._proto(), self.target.ip, "info",
+                             f"spidering {share_name}{path or ''}... ({ext_info})")
 
-        Devuelve la lista de rutas locales descargadas.
-        """
-        if extensions is _USE_DEFAULT:
-            extensions = DEFAULT_SPIDER_EXTENSIONS
-        elif extensions is None:
-            extensions = []
+            if _depth > max_depth:
+                return []
 
-        if _depth == 0:
-            ext_info = f"{len(extensions)} extensión(es)" if extensions else "sin filtro de extensión"
-            print_result(self._proto(), self.target.ip, "info",
-                         f"spidering {share_name}{path or ''}... ({ext_info})")
+            keywords   = keywords or []
+            downloaded = []
+            candidates = []
 
-        if _depth > max_depth:
-            return []
+            entries = self.list_files(share_name, path, silent=True)
 
-        keywords = keywords or []
-        downloaded = []
+            for name, is_dir_str, size in entries:
+                entry_path = f"{path}\\{name}" if path else f"\\{name}"
 
-        entries = self.list_files(share_name, path, silent=True)
+                if is_dir_str == "Sí":
+                    downloaded += self.spider_share(
+                        share_name, entry_path, extensions, keywords,
+                        max_depth, _depth + 1, confirm=confirm,
+                    )
+                    continue
 
-        for name, is_dir_str, size in entries:
-            entry_path = f"{path}\\{name}" if path else f"\\{name}"
+                matches_ext     = any(name.lower().endswith(ext.lower()) for ext in extensions)
+                matches_keyword = any(kw.lower() in name.lower() for kw in keywords)
 
-            if is_dir_str == "Sí":
-                downloaded += self.spider_share(
-                    share_name, entry_path, extensions, keywords, max_depth, _depth + 1
+                if matches_ext or matches_keyword:
+                    candidates.append((name, entry_path, size))
+
+            if candidates:
+                if confirm:
+                    from core.output import console
+                    console.print(
+                        f"\n  [bold yellow]Ficheros encontrados en "
+                        f"[cyan]{share_name}{path or ''}[/cyan]:[/bold yellow]"
+                    )
+                    for i, (name, entry_path, size) in enumerate(candidates, 1):
+                        size_str = f"{size:,} bytes" if size else "?"
+                        console.print(f"  [{i}] [white]{name}[/white]  [dim]{size_str}[/dim]")
+
+                    console.print(
+                        "\n  [dim]Opciones: [bold]all[/bold] = todos  "
+                        "[bold]none[/bold] = saltar  "
+                        "o números separados por coma (ej: 1,3)[/dim]"
+                    )
+                    answer = console.input("  Selección: ").strip().lower()
+
+                    if answer == "all":
+                        selected = list(range(len(candidates)))
+                    elif answer in ("none", ""):
+                        selected = []
+                    else:
+                        selected = []
+                        for part in answer.split(","):
+                            part = part.strip()
+                            if part.isdigit():
+                                idx = int(part) - 1
+                                if 0 <= idx < len(candidates):
+                                    selected.append(idx)
+                else:
+                    selected = list(range(len(candidates)))
+
+                for idx in selected:
+                    name, entry_path, size = candidates[idx]
+                    local_path = os.path.join(
+                        "loot", self.target.ip, share_name.strip("\\"),
+                        path.strip("\\"), name,
+                    )
+                    if self.download_file(share_name, entry_path, local_path):
+                        downloaded.append(local_path)
+
+            if _depth == 0:
+                print_result(self._proto(), self.target.ip, "info",
+                             f"spidering completado: {len(downloaded)} fichero(s) descargado(s)")
+
+            return downloaded
+
+    def spider_all_shares(self, extensions=_USE_DEFAULT, keywords=None,
+                          max_depth=5, include_special=False, confirm=False):
+            """
+            Recorre TODOS los shares no especiales usando spider_share().
+            """
+            shares = self.list_shares(silent=True)
+            if not shares:
+                print_result(self._proto(), self.target.ip, "fail",
+                             "no se pudieron listar shares para el spidering")
+                return []
+
+            all_downloaded = []
+
+            for name, share_type, comment in shares:
+                if not include_special and "special" in share_type:
+                    continue
+                print_result(self._proto(), self.target.ip, "info", f"Looking for share: {name}...")
+                downloaded = self.spider_share(
+                    name, extensions=extensions, keywords=keywords,
+                    max_depth=max_depth, confirm=confirm,
                 )
-                continue
+                all_downloaded += downloaded
 
-            matches_ext = any(name.lower().endswith(ext.lower()) for ext in extensions)
-            matches_keyword = any(kw.lower() in name.lower() for kw in keywords)
+            if all_downloaded:
+                rows = [(os.path.basename(p), p) for p in all_downloaded]
+                print_table(f"Ficheros descargados en {self.target.ip}",
+                            ["Fichero", "Ruta local"], rows)
+            else:
+                print_result(self._proto(), self.target.ip, "info",
+                             "spidering completo: no se encontró nada que descargar")
 
-            if matches_ext or matches_keyword:
-                local_path = os.path.join(
-                    "loot", self.target.ip, share_name.strip("\\"),
-                    path.strip("\\"), name
-                )
-                if self.download_file(share_name, entry_path, local_path):
-                    downloaded.append(local_path)
+            return all_downloaded
 
-        if _depth == 0:
-            print_result(self._proto(), self.target.ip, "info",
-                         f"spidering completado: {len(downloaded)} fichero(s) descargado(s)")
-
-        return downloaded
-
-    def spider_all_shares(self, extensions=_USE_DEFAULT, keywords=None, max_depth=5, include_special=False):
-        """
-        Recorre TODOS los shares del objetivo (excepto los especiales como
-        ADMIN$/C$/IPC$, salvo que include_special=True) usando spider_share()
-        en cada uno. Imprime progreso por share y un resumen final con
-        tabla de lo descargado.
-
-        extensions/keywords/max_depth: mismos parámetros que spider_share().
-        Devuelve la lista completa de rutas locales descargadas.
-        """
-        shares = self.list_shares(silent=True)
-        if not shares:
-            print_result(self._proto(), self.target.ip, "fail", "no se pudieron listar shares para el spidering")
-            return []
-
-        all_downloaded = []
-
-        for name, share_type, comment in shares:
-            if not include_special and "special" in share_type:
-                continue
-
-            print_result(self._proto(), self.target.ip, "info", f"Looking for share: {name}...")
-            downloaded = self.spider_share(name, extensions=extensions, keywords=keywords, max_depth=max_depth)
-            all_downloaded += downloaded
-
-        if all_downloaded:
-            rows = [(os.path.basename(p), p) for p in all_downloaded]
-            print_table(f"Ficheros descargados en {self.target.ip}", ["Fichero", "Ruta local"], rows)
-        else:
-            print_result(self._proto(), self.target.ip, "info", "spidering completo: no se encontró nada que descargar")
-
-        return all_downloaded
-
+    
     def password_spray(self, users, password, domain=""):
         """
         Prueba una misma contraseña contra una lista de usuarios.

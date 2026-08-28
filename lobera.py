@@ -260,7 +260,6 @@ def _get_family_paths(module, family):
 # ============================================================
 # Árbol visual
 # ============================================================
-
 def _print_module_tree(module):
     _print_module_banner(module)
 
@@ -273,15 +272,18 @@ def _print_module_tree(module):
         console.print(f"[dim]  (buscando en: {_ROOT / 'scripts' / module})[/dim]")
         return
 
+    from rich.text import Text
     tree = Tree(f"[bold {color}]{module.upper()}[/bold {color}]")
     for family, metas in tree_data.items():
         branch = tree.add(f"[bold {color}]{family}[/bold {color}]")
         for m in metas:
-            desc = m.description[:80]
-            branch.add(f"[bold white]{m.name}[/bold white]  [dim]{desc}[/dim]")
-    console.print(tree)
+            label = Text()
+            label.append(m.name, style="bold white")
+            label.append("  ")
+            label.append(m.description, style="dim")
+            branch.add(label)
+    console.print(tree, overflow="fold")
     console.print(f"\n[dim]lobera.py {module} --script=<nombre> -t <ip> [opciones][/dim]")
-
 # ============================================================
 # Ejecución
 # ============================================================
@@ -393,24 +395,17 @@ def build_parser():
     )
     subs = parser.add_subparsers(dest="module", metavar="módulo")
 
-    # ---- SMB ----
-    smb = subs.add_parser("smb", help="Scripts SMB")
-    add_common_args(smb); _add_script_args(smb)
-    smb.add_argument("--smb-version", choices=["v1","v2","v2.1","v3"],
-                     default=None, dest="smb_version")
-    smb.add_argument("--shares",    action="store_true")
-    smb.add_argument("--signing",   action="store_true")
-    smb.add_argument("--null-sess", action="store_true", dest="null_sess")
-    smb.add_argument("--share",     default=None)
-    smb.add_argument("--ext",       default=None)
-    smb.add_argument("--keywords",  default=None)
-    smb.add_argument("--depth",     type=int, default=5)
-    smb.add_argument("--userlist",  default=None, metavar="FILE")
-    smb.add_argument("--scanner",   action="store_true",
-                     help="Modo autopwn interactivo SMB")
+        # ---- SMB ----
+    smb = subs.add_parser(
+        "smb",
+        help="Consola interactiva de scripts SMB",
+    )
+    smb.add_argument(
+        "--scanner", action="store_true",
+        help="Modo autopwn interactivo SMB",
+    )
 
-
-
+    
     # ---- Kerberos ----
     krb = subs.add_parser("kerberos", help="Scripts Kerberos")
     add_common_args(krb); _add_script_args(krb)
@@ -544,8 +539,9 @@ def run_smb(args):
         from scripts.smb.scanner import run_smb_scanner
         run_smb_scanner(args)
         return
-    run_module_generic("smb", args)
-   
+    from modules.smb_script_shell import SMBScriptShell
+    SMBScriptShell(_ROOT).run()
+
 
 
 def run_kerberos(args):
@@ -678,16 +674,17 @@ def _show_db_examples(action):
 # ============================================================
 # Entry point
 # ============================================================
-
 def main():
-    # Asegurar que el directorio raíz está en sys.path para que los
-    # scripts puedan hacer "from core.output import ..." al importarse
     root_str = str(_ROOT)
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
-
+    
     show_banner()
     init_db()
+
+    from core.auth import login
+    if not login():
+        sys.exit(1)
 
     parser = build_parser()
     args   = parser.parse_args()
@@ -720,7 +717,6 @@ def main():
         runner(args)
     else:
         console.print(f"[red]Módulo desconocido: {args.module}[/red]")
-
 
 if __name__ == "__main__":
     try:

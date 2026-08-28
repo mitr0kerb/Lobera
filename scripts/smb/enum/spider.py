@@ -15,24 +15,27 @@ def _parse_csv(raw):
 class SpiderScript(BaseScript):
     name = "spider"
     description = "Rastrea shares SMB y descarga ficheros interesantes por extensión/keyword"
-
     examples = [
         {"flag": "--share",
          "desc": "Restringe el rastreo a un único share. Si se omite, rastrea TODOS los shares no especiales",
          "good": "smb --script=spider -t 10.129.1.5 -u iker --share Users",
-         "bad": "smb --script=spider -t 10.129.1.5 -u iker --share ADMIN$  [shares especiales rara vez tienen contenido de usuario]"},
+         "bad": "smb --script=spider -t 10.129.1.5 -u iker --share ADMIN$"},
         {"flag": "--ext",
-         "desc": "Extensiones a buscar separadas por coma; vacío ('') = sin filtro de extensión",
+         "desc": "Extensiones a buscar separadas por coma; vacío = sin filtro",
          "good": "smb --script=spider -t 10.129.1.5 -u iker --ext .kdbx,.txt",
-         "bad": "smb --script=spider -t 10.129.1.5 -u iker --ext ''  [descarga TODO, puede tardar mucho y llenar disco]"},
+         "bad": "smb --script=spider -t 10.129.1.5 -u iker --ext ''"},
         {"flag": "--keywords",
-         "desc": "Palabras clave a buscar en nombres de fichero, separadas por coma",
+         "desc": "Palabras clave a buscar en nombres de fichero",
          "good": "smb --script=spider -t 10.129.1.5 -u iker --keywords password,backup",
-         "bad": "smb --script=spider -t 10.129.1.5 -u iker --keywords a,e,i  [keywords tan cortas generan falsos positivos masivos]"},
+         "bad": "smb --script=spider -t 10.129.1.5 -u iker --keywords a,e,i"},
         {"flag": "--depth",
          "desc": "Profundidad máxima de recursión (default: 5)",
-         "good": "smb --script=spider -t 10.129.1.5 -u iker --depth 3  [suficiente para perfiles de usuario típicos]",
-         "bad": "smb --script=spider -t 10.129.1.5 -u iker --depth 20  [en C$ puede tardar muchísimo]"},
+         "good": "smb --script=spider -t 10.129.1.5 -u iker --depth 3",
+         "bad": "smb --script=spider -t 10.129.1.5 -u iker --depth 20"},
+        {"flag": "--no-confirm",
+         "desc": "Descarga sin pedir confirmación (por defecto siempre pregunta)",
+         "good": "smb --script=spider -t 10.129.1.5 -u iker --no-confirm",
+         "bad": "smb --script=spider -t 10.129.1.5 -u iker --no-confirm --ext ''"},
     ]
 
     def run(self, **kwargs):
@@ -42,15 +45,15 @@ class SpiderScript(BaseScript):
         if not smb.login():
             return
 
-        share = kwargs.get("share")
+        share      = kwargs.get("share")
         extensions = _parse_csv(kwargs.get("ext"))
-        keywords = _parse_csv(kwargs.get("keywords"))
-        # Usar "is not None" en vez de "or" — depth=0 es un valor válido
-        # (sin recursión). kwargs.get("depth") or 5 silenciaría el 0.
+        keywords   = _parse_csv(kwargs.get("keywords"))
         _raw_depth = kwargs.get("depth")
-        depth = _raw_depth if _raw_depth is not None else 5
+        depth      = _raw_depth if _raw_depth is not None else 5
+        # confirm=True por defecto — el usuario puede desactivarlo con no_confirm=True
+        confirm    = not kwargs.get("no_confirm", False)
 
-        spider_kwargs = {"max_depth": depth, "keywords": keywords}
+        spider_kwargs = {"max_depth": depth, "keywords": keywords, "confirm": confirm}
         if extensions is not None:
             spider_kwargs["extensions"] = extensions
 
@@ -58,5 +61,6 @@ class SpiderScript(BaseScript):
             results = smb.spider_share(share, **spider_kwargs)
         else:
             results = smb.spider_all_shares(**spider_kwargs)
+
         smb.disconnect()
         return results
