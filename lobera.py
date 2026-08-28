@@ -135,11 +135,11 @@ class _ScriptMeta:
         self.category    = category
         self.path        = path          # pathlib.Path al fichero .py
 
-
 def _script_metadata(py_path):
     """
     Extrae name, description, category de un script leyendo el AST
-    sin importarlo. Devuelve _ScriptMeta o None si falla.
+    sin importarlo. Funciona con cualquier nombre de clase que herede
+    de BaseScript (SharesScript, UserEnumScript, Script, etc.).
     """
     try:
         source = py_path.read_text(encoding="utf-8", errors="replace")
@@ -150,7 +150,8 @@ def _script_metadata(py_path):
     meta = {"name": None, "description": None, "category": None}
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == "Script":
+        # Cualquier clase que herede de algo (tiene al menos una base)
+        if isinstance(node, ast.ClassDef) and node.bases:
             for item in node.body:
                 if isinstance(item, ast.Assign):
                     for target in item.targets:
@@ -158,10 +159,11 @@ def _script_metadata(py_path):
                                 and target.id in meta
                                 and isinstance(item.value, ast.Constant)):
                             meta[target.id] = item.value.value
-            break  # solo la primera clase Script
+            # Primera clase con bases que tenga name definido
+            if meta["name"] is not None:
+                break
 
     if meta["name"] is None:
-        # Fallback: usar el nombre del fichero
         meta["name"] = py_path.stem
 
     return _ScriptMeta(
@@ -275,11 +277,10 @@ def _print_module_tree(module):
     for family, metas in tree_data.items():
         branch = tree.add(f"[bold {color}]{family}[/bold {color}]")
         for m in metas:
-            desc = m.description[:72]
+            desc = m.description[:80]
             branch.add(f"[bold white]{m.name}[/bold white]  [dim]{desc}[/dim]")
     console.print(tree)
     console.print(f"\n[dim]lobera.py {module} --script=<nombre> -t <ip> [opciones][/dim]")
-
 
 # ============================================================
 # Ejecución
