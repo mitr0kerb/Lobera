@@ -21,7 +21,11 @@ import socket
 import struct
 
 KRB_PORT = 88
-DEFAULT_TIMEOUT = 5  # segundos
+DEFAULT_TIMEOUT = 5      # segundos
+MAX_KRB_RESPONSE = 64 * 1024   # 64 KB — el mayor mensaje Kerberos real es ~8 KB;
+                                # ningún KDC legítimo supera 64 KB. Este límite
+                                # evita que un servidor malicioso provoque OOM
+                                # enviando un prefijo de longitud ficticio (ej. 3 GB).
 
 
 def _send_recv_tcp(host: str, data: bytes, timeout: int = DEFAULT_TIMEOUT) -> bytes:
@@ -46,7 +50,15 @@ def _send_recv_tcp(host: str, data: bytes, timeout: int = DEFAULT_TIMEOUT) -> by
         raw_len = _recv_exactly(sock, 4)
         resp_len = struct.unpack(">I", raw_len)[0]
 
-        # Leemos exactamente resp_len bytes
+        # Guardia contra memory-bomb: un servidor malicioso podría enviar
+        # resp_len = 0xFFFFFFFF (4 GB) → el intento de bytearray crashea el proceso.
+        if resp_len > MAX_KRB_RESPONSE:
+            raise ValueError(
+                f"Respuesta del KDC demasiado grande: {resp_len} bytes "
+                f"(máximo permitido: {MAX_KRB_RESPONSE}). "
+                "Posible servidor malicioso o error de framing TCP."
+            )
+
         return _recv_exactly(sock, resp_len)
 
 

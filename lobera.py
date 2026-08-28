@@ -108,6 +108,75 @@ def build_parser():
     smb_parser.add_argument("--userlist", default=None, metavar="FILE",
                              help="[password-spray] Fichero con un usuario por línea")
 
+    # Módulo: kerberos
+    # ============================================================
+    kerberos_parser = subparsers.add_parser(
+        "kerberos",
+        help="Kerberos: sin argumentos lista familias/scripts; usa --script o --script-fam para ejecutar"
+    )
+    add_common_target_args(kerberos_parser)
+    kerberos_parser.add_argument("--script", default=None,
+                                  help="Ejecuta un script concreto por su nombre (ver 'lobera.py kerberos')")
+    kerberos_parser.add_argument("--script-fam", default=None, metavar="FAM1/FAM2",
+                                  help="Ejecuta TODOS los scripts de una o varias familias, separadas por '/'")
+    kerberos_parser.add_argument("--example", action="store_true",
+                                  help="Muestra ejemplos de uso del script indicado en --script")
+    # ── Enumeración ───────────────────────────────────────────────────────
+    kerberos_parser.add_argument("--userlist", default=None, metavar="FILE",
+                                  help="[user-enum / asrep-roasting] Fichero con un usuario por línea")
+    kerberos_parser.add_argument("--spn", default=None, metavar="SPN",
+                                  help="[kerberoasting / silver-ticket / constrained-s4u] SPN objetivo "
+                                       "(formato servicio/host o servicio/host:puerto)")
+    # ── Tickets ──────────────────────────────────────────────────────────
+    kerberos_parser.add_argument("--ccache", default=None, metavar="FILE",
+                                  help="[pass-the-ticket] Ruta a fichero .ccache (MIT Kerberos)")
+    kerberos_parser.add_argument("--kirbi", default=None, metavar="FILE",
+                                  help="[pass-the-ticket] Ruta a fichero .kirbi (Windows/Mimikatz)")
+    kerberos_parser.add_argument("--krbtgt-hash", default=None, metavar="HASH",
+                                  help="[golden-ticket / diamond / sapphire] NT hash de krbtgt "
+                                       "(32 hex chars o LM:NT)")
+    kerberos_parser.add_argument("--service-hash", default=None, metavar="HASH",
+                                  help="[silver-ticket] NT hash de la cuenta de servicio objetivo")
+    kerberos_parser.add_argument("--domain-sid", default=None, metavar="SID",
+                                  help="[golden / silver / sam-spoofing] SID del dominio "
+                                       "(formato S-1-5-21-A-B-C, sin el RID final)")
+    kerberos_parser.add_argument("--user-id", type=int, default=500, metavar="RID",
+                                  help="[golden / diamond] RID del usuario a impersonar (default: 500 = Administrator)")
+    kerberos_parser.add_argument("--groups", default=None, metavar="RIDS",
+                                  help="[golden / diamond] RIDs de grupos separados por coma "
+                                       "(default: 512,513,518,519,520)")
+    # ── Delegación / Impersonación ────────────────────────────────────────
+    kerberos_parser.add_argument("--target-user", default=None, metavar="USER",
+                                  help="[constrained-s4u / sapphire / shadow-creds / rbcd / sam-spoofing] "
+                                       "Usuario a impersonar en el servicio destino")
+    kerberos_parser.add_argument("--target-computer", default=None, metavar="HOST",
+                                  help="[rbcd] Nombre NetBIOS del equipo objetivo (sin FQDN)")
+    kerberos_parser.add_argument("--attacker-account", default=None, metavar="ACCOUNT",
+                                  help="[rbcd / kerber-loss] Cuenta bajo control del atacante "
+                                       "(máquina con $, ej. EVIL01$)")
+    # ── Certificados / AD CS ──────────────────────────────────────────────
+    kerberos_parser.add_argument("--cert", default=None, metavar="FILE",
+                                  help="[pkinit] Ruta al fichero PEM con clave privada (y opcionalmente cert)")
+    kerberos_parser.add_argument("--pfx", default=None, metavar="FILE",
+                                  help="[pkinit / adcs] Fichero PKCS#12 (.pfx/.p12) con clave + certificado")
+    kerberos_parser.add_argument("--template", default=None, metavar="NAME",
+                                  help="[adcs] Nombre de la plantilla de certificado a abusar (ESC1)")
+    kerberos_parser.add_argument("--ca", default=None, metavar="NAME",
+                                  help="[adcs] Nombre de la Certificate Authority (CN de la CA)")
+    kerberos_parser.add_argument("--alt-name", default=None, metavar="UPN",
+                                  help="[adcs] UPN a incluir en el SAN del certificado ESC1 "
+                                       "(ej. Administrator@corp.local)")
+    # ── Exploits ──────────────────────────────────────────────────────────
+    kerberos_parser.add_argument("--dc-name", default=None, metavar="NAME",
+                                  help="[sam-spoofing] Nombre NetBIOS del DC (sin $). "
+                                       "Si se omite, se autodetecta via DNS.")
+    kerberos_parser.add_argument("--user-sid", default=None, metavar="SID",
+                                  help="[ms14-068] SID completo del usuario atacante "
+                                       "(ej. S-1-5-21-A-B-C-1103). Obtenible con whoami /user.")
+    kerberos_parser.add_argument("--vector", default=None, metavar="VECTOR",
+                                  help="[kerber-loss] Vector de ataque: "
+                                       "dos-colision | ntlm-downgrade | spn-jacking")
+
     # Módulo: db (consulta de la base de datos de sesión)
     # ============================================================
     db_parser = subparsers.add_parser("db", help="Consulta la base de datos de sesión (objetivos, credenciales, hallazgos)")
@@ -355,6 +424,37 @@ def build_script_kwargs(args):
     }
 
 
+def build_script_kwargs_kerberos(args):
+    """Flags específicos de kerberos — cada script coge los que necesita."""
+    return {
+        # Enumeración
+        "userlist":         getattr(args, "userlist", None),
+        "spn":              getattr(args, "spn", None),
+        # Tickets
+        "ccache":           getattr(args, "ccache", None),
+        "kirbi":            getattr(args, "kirbi", None),
+        "krbtgt_hash":      getattr(args, "krbtgt_hash", None),
+        "service_hash":     getattr(args, "service_hash", None),
+        "domain_sid":       getattr(args, "domain_sid", None),
+        "user_id":          getattr(args, "user_id", 500),
+        "groups":           getattr(args, "groups", None),
+        # Delegación / impersonación
+        "target_user":      getattr(args, "target_user", None),
+        "target_computer":  getattr(args, "target_computer", None),
+        "attacker_account": getattr(args, "attacker_account", None),
+        # Certificados / AD CS
+        "cert":             getattr(args, "cert", None),
+        "pfx":              getattr(args, "pfx", None),
+        "template":         getattr(args, "template", None),
+        "ca":               getattr(args, "ca", None),
+        "alt_name":         getattr(args, "alt_name", None),
+        # Exploits
+        "dc_name":          getattr(args, "dc_name", None),
+        "user_sid":         getattr(args, "user_sid", None),
+        "vector":           getattr(args, "vector", None),
+    }
+
+
 def print_protocol_tree(protocol):
     """Árbol de familias -> scripts de un protocolo. Se muestra cuando el
     protocolo se invoca sin --script ni --script-fam."""
@@ -474,6 +574,56 @@ def run_smb(args):
 
     target, creds = _build_target_creds(args)
     kwargs = build_script_kwargs(args)
+
+    if args.script:
+        run_single_script(protocol, args.script, target, creds, kwargs)
+    else:
+        families = [f for f in args.script_fam.split("/") if f]
+        run_family_scripts(protocol, families, target, creds, kwargs)
+
+
+def run_kerberos(args):
+    protocol = "kerberos"
+
+    if args.script and args.script_fam:
+        console.print("[red]No combines --script y --script-fam en la misma llamada.[/red]")
+        return
+
+    if not args.script and not args.script_fam:
+        if getattr(args, "example", False):
+            console.print("[yellow]--example necesita --script=<nombre> o --script-fam=<familia>.[/yellow]")
+        print_protocol_tree(protocol)
+        return
+
+    if getattr(args, "example", False):
+        if args.script:
+            show_script_example(protocol, args.script)
+        else:
+            for fam in args.script_fam.split("/"):
+                if not fam:
+                    continue
+                console.print(f"\n[bold cyan]--- Familia: {fam} ---[/bold cyan]")
+                fam_scripts = scripts_loader.get_by_category(protocol, fam)
+                if not fam_scripts:
+                    console.print(f"[yellow]No hay scripts en la familia '{fam}'.[/yellow]")
+                    continue
+                for name in sorted(fam_scripts):
+                    show_script_example(protocol, name)
+        return
+
+    # Scripts que NO requieren -t (solo necesitan -d y credenciales)
+    NO_TARGET_SCRIPTS = {
+        "golden-ticket",   # forja local, no habla con el KDC
+        "silver-ticket",   # forja local
+        "pass-the-ticket", # importa un fichero local
+    }
+    script_name = args.script or ""
+    if script_name not in NO_TARGET_SCRIPTS:
+        if not require_target(args):
+            return
+
+    target, creds = _build_target_creds(args)
+    kwargs = build_script_kwargs_kerberos(args)
 
     if args.script:
         run_single_script(protocol, args.script, target, creds, kwargs)
@@ -698,12 +848,14 @@ def main():
         # arranque sin dar ningun argumento todavia.
         if not is_first_run:
             console.print("[yellow]No se ha especificado ningun modulo.[/yellow]")
-            console.print("Modulos disponibles: [bold]smb, rpc, db[/bold]")
+            console.print("Modulos disponibles: [bold]smb, kerberos, rpc, db[/bold]")
             console.print("Uso: [dim]lobera.py <modulo> -h[/dim] para ver las acciones de cada uno.\n")
         return
     
     if args.module == "smb":
         run_smb(args)
+    elif args.module == "kerberos":
+        run_kerberos(args)
     elif args.module == "rpc":
         run_rpc(args)
     elif args.module == "db":

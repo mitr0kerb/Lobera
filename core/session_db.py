@@ -100,8 +100,25 @@ TABLES = {
 
 
 def _connect():
+    """
+    Abre la conexión SQLite con dos mejoras de robustez:
+
+    timeout=30:  En vez de fallar inmediatamente cuando hay lock de escritura
+                 (ej. dos terminales corriendo en paralelo), SQLite espera
+                 hasta 30 s antes de lanzar OperationalError. Más que suficiente
+                 para cualquier operación de Lobera — las escrituras son breves.
+
+    WAL mode:   Write-Ahead Logging permite lectura concurrente mientras hay
+                una escritura activa. Sin WAL, SQLite bloquea lectores durante
+                cada INSERT. Con WAL, 'db findings' puede correr mientras otro
+                proceso guarda hallazgos — sin errores de lock.
+
+    Ambas opciones son seguras con SQLite en un único host y no requieren
+    cambiar el formato del fichero .db.
+    """
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
     return conn
 

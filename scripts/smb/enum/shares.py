@@ -6,13 +6,17 @@ from modules.smb import SMBModule
 
 class SharesScript(BaseScript):
     name = "shares"
-    description = "Lista los shares disponibles en el objetivo (requiere login)"
+    description = "Lista los shares SMB disponibles (requiere login)"
 
     examples = [
-        {"flag": "(uso básico)",
-         "desc": "Requiere -u/-p o -H para login; sin credenciales hace null session",
+        {"flag": "-u / --user",
+         "desc": "Usuario para login. Sin él, se intenta null session",
          "good": "smb --script=shares -t 10.129.1.5 -u iker -p 'Pass123!'",
          "bad": "smb --script=shares -t 10.129.1.5  [sin -u, null session puede dar Access Denied]"},
+        {"flag": "-H / --hash",
+         "desc": "Pass-the-hash en vez de contraseña",
+         "good": "smb --script=shares -t 10.129.1.5 -u administrator -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c",
+         "bad": "smb --script=shares -t 10.129.1.5 -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c  [sin -u, no se sabe que usuario autenticar]"},
     ]
 
     def run(self, **kwargs):
@@ -21,4 +25,6 @@ class SharesScript(BaseScript):
             return
         if not smb.login():
             return
-        smb.list_shares()
+        results = smb.list_shares()
+        smb.disconnect()
+        return results

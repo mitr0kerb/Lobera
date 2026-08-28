@@ -7,20 +7,28 @@ from modules.smb_shell import SMBShell
 
 class InteractiveShellScript(BaseScript):
     name = "interactive-shell"
-    description = "Abre una consola interactiva SMB (shares, use, ls, cd, get...)"
-
-    examples = [
-        {"flag": "(uso básico)",
-         "desc": "Necesita login real para tener permisos útiles en la shell",
-         "good": "smb --script=interactive-shell -t 10.129.1.5 -u iker -p 'Summer2024!'",
-         "bad": "smb --script=interactive-shell -t 10.129.1.5  [sin -u, entrarás con null session y la mayoría de comandos fallarán]"},
-    ]
+    description = "Abre una consola interactiva SMB (shares, use, cd, ls, get...)"
 
     def run(self, **kwargs):
-        smb = SMBModule(self.target, self.creds)
+        # La shell interactiva necesita un timeout generoso: comandos como
+        # 'get archivo_grande.zip' o 'ls C:\' pueden tardar minutos.
+        # El timeout del objeto Target (default 5 s) es adecuado para
+        # conexión y login, pero NO para operaciones de usuario arbitrarias.
+        # Creamos una copia del target con timeout extendido solo para la shell.
+        import dataclasses
+        if hasattr(self.target, '__dataclass_fields__'):
+            shell_target = dataclasses.replace(self.target, timeout=120)
+        else:
+            # Fallback: mutación directa de atributo (si Target no es dataclass)
+            import copy as _copy
+            shell_target = _copy.copy(self.target)
+            shell_target.timeout = 120
+
+        smb = SMBModule(shell_target, self.creds)
         if not smb.connect():
             return
         if not smb.login():
             return
+
         shell = SMBShell(smb)
         shell.run()
