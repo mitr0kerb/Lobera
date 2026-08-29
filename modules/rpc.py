@@ -63,7 +63,7 @@ API pública:
 import os
 import time
 
-from impacket.dcerpc.v5 import transport, samr, lsat, lsad, srvsvc, wkst, scmr, rrp, epm
+from impacket.dcerpc.v5 import transport, samr, lsat, lsad, srvs as srvsvc, wkst, scmr, rrp, epm
 from impacket.dcerpc.v5 import tsch   # Task Scheduler
 from impacket.dcerpc.v5.dtypes import NULL, MAXIMUM_ALLOWED
 from impacket.dcerpc.v5.rpcrt import DCERPCException

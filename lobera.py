@@ -410,53 +410,22 @@ def build_parser():
     krb = subs.add_parser("kerberos", help="Consola interactiva de scripts Kerberos")
     krb.add_argument("--scanner", action="store_true",
                      help="Modo autopwn interactivo Kerberos")
+    
+        # ---- RPC ----
+    rpc = subs.add_parser("rpc", help="Consola interactiva de scripts RPC")
+    rpc.add_argument("--scanner", action="store_true",
+                     help="Modo autopwn interactivo RPC")
 
-    # ---- RPC ----
-    rpc = subs.add_parser("rpc", help="Scripts RPC (SAMR, LSA, SCM, WINREG…)")
-    add_common_args(rpc); _add_script_args(rpc)
-    rpc.add_argument("--shell",            action="store_true",
-                     help="Abre la consola interactiva RPC")
-    rpc.add_argument("--local-admins",     action="store_true", dest="local_admins")
-    rpc.add_argument("--running-only",     action="store_true", dest="running_only")
-    rpc.add_argument("--interesting-only", action="store_true", dest="interesting_only")
-    rpc.add_argument("--open-files",       action="store_true", dest="open_files")
-    rpc.add_argument("--priv",             default=None)
-    rpc.add_argument("--hive",             default="HKLM")
-    rpc.add_argument("--key",              default=None)
-    rpc.add_argument("--value",            default=None)
-    rpc.add_argument("--action",           default=None)
-    rpc.add_argument("--command",          default=None)
-    rpc.add_argument("--svc-name",         default="LobSvc", dest="svc_name")
-    rpc.add_argument("--wait",             type=int, default=3)
-    rpc.add_argument("--dll-path",         default=None, dest="dll_path")
-    rpc.add_argument("--listener",         default=None)
-    rpc.add_argument("--pipe",             default="lsarpc",
-                     choices=["lsarpc","efsrpc","samr","lsass","netlogon"])
-    rpc.add_argument("--rid-start",        type=int, default=500, dest="rid_start")
-    rpc.add_argument("--rid-end",          type=int, default=10000, dest="rid_end")
-    rpc.add_argument("--out-dir",          default=None, dest="out_dir")
-
-    # ---- LDAP ----
+       # ---- LDAP ----
     ldap = subs.add_parser("ldap", help="Consola interactiva de scripts LDAP")
     ldap.add_argument("--scanner", action="store_true",
                       help="Modo autopwn interactivo LDAP")
+    
+        # ---- WinRM ----
+    winrm = subs.add_parser("winrm", help="Consola interactiva de scripts WinRM")
+    winrm.add_argument("--scanner", action="store_true",
+                       help="Modo autopwn interactivo WinRM")
 
-    # ---- WinRM ----
-    winrm = subs.add_parser("winrm", help="Scripts WinRM / PowerShell remoto")
-    add_common_args(winrm); _add_script_args(winrm)
-    winrm.add_argument("--shell",    action="store_true",
-                       help="Abre consola interactiva WinRM/PS")
-    winrm.add_argument("--ssl",      action="store_true",
-                       help="Usar HTTPS (puerto 5986)")
-    winrm.add_argument("--port",     type=int, default=None)
-    winrm.add_argument("--command",  default=None)
-    winrm.add_argument("--script-ps",default=None, dest="script_ps", metavar="FILE")
-    winrm.add_argument("--out-dir",  default=None, dest="out_dir")
-    winrm.add_argument("--userlist", default=None, metavar="FILE")
-    winrm.add_argument("--action",   default=None)
-    winrm.add_argument("--listener", default=None)
-    winrm.add_argument("--lport",    type=int, default=4444)
-    winrm.add_argument("--url",      default=None)
 
     # ---- DB ----
     db      = subs.add_parser("db", help="Base de datos de sesión")
@@ -504,14 +473,13 @@ def run_kerberos(args):
     from modules.kerberos_script_shell import KerberosScriptShell
     KerberosScriptShell(_ROOT).run()
 
-
 def run_rpc(args):
-    if getattr(args, "shell", False):
-        from modules.rpc_shell import RPCShell
-        RPCShell(make_target(args), make_creds(args)).run()
+    if getattr(args, "scanner", False):
+        from scripts.rpc.scanner import run_rpc_scanner
+        run_rpc_scanner(args)
         return
-    run_module_generic("rpc", args)
-
+    from modules.rpc_script_shell import RPCScriptShell
+    RPCScriptShell(_ROOT).run()
 
 def run_ldap(args):
     if getattr(args, "scanner", False):
@@ -521,16 +489,13 @@ def run_ldap(args):
     from modules.ldap_script_shell import LDAPScriptShell
     LDAPScriptShell(_ROOT).run()
 
-
 def run_winrm(args):
-    if getattr(args, "shell", False):
-        from modules.winrm_shell import WinRMShell
-        WinRMShell(make_target(args), make_creds(args),
-                   use_ssl=getattr(args,"ssl",False),
-                   port=getattr(args,"port",None)).run()
+    if getattr(args, "scanner", False):
+        from scripts.winrm.scanner import run_winrm_scanner
+        run_winrm_scanner(args)
         return
-    run_module_generic("winrm", args)
-
+    from modules.winrm_script_shell import WinRMScriptShell
+    WinRMScriptShell(_ROOT).run()
 
 # ============================================================
 # Runner DB
