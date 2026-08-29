@@ -14,7 +14,7 @@ from core.scanner import Scanner, ScanStep, ScanContext
 from scripts.ssh.scan_params import SCAN_ORDER, REQUIRED, OPTIONAL, EXPORT_FORMATS
 
 PROTOCOL = "SSH"
-COLOR    = "green"
+COLOR    = "turquoise2"
 
 
 def _print_scanner_menu():

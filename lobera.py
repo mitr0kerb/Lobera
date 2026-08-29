@@ -30,6 +30,7 @@ MODULE_CONFIG = {
     "rpc":      {"color": "blue",    "label": "Rscripts", "proto": "RPC"},
     "ldap":     {"color": "yellow",  "label": "Lscripts", "proto": "LDAP"},
     "winrm":    {"color": "cyan",    "label": "Wscripts", "proto": "WINRM"},
+    "ssh":      {"color": "turquoise2", "label": "SSHscripts", "proto": "SSH"},
 }
 
 NO_TARGET_SCRIPTS = {
@@ -405,7 +406,11 @@ def build_parser():
         help="Modo autopwn interactivo SMB",
     )
 
-    
+       # ---- SSH ----
+    ssh = subs.add_parser("ssh", help="Consola interactiva de scripts SSH")
+    ssh.add_argument("--scanner", action="store_true",
+                     help="Modo autopwn interactivo SSH")
+
         # ---- Kerberos ----
     krb = subs.add_parser("kerberos", help="Consola interactiva de scripts Kerberos")
     krb.add_argument("--scanner", action="store_true",
@@ -464,6 +469,14 @@ def run_smb(args):
         return
     from modules.smb_script_shell import SMBScriptShell
     SMBScriptShell(_ROOT).run()
+
+def run_ssh(args):
+    if getattr(args, "scanner", False):
+        from scripts.ssh.scanner import run_ssh_scanner
+        run_ssh_scanner(args)
+        return
+    from modules.ssh_script_shell import SSHScriptShell
+    SSHScriptShell(_ROOT).run()
 
 def run_kerberos(args):
     if getattr(args, "scanner", False):
@@ -619,6 +632,7 @@ def main():
             "[bold blue]rpc[/bold blue] · "
             "[bold yellow]ldap[/bold yellow] · "
             "[bold cyan]winrm[/bold cyan] · "
+            "[bold turquoise2]ssh[/bold turquoise2] · "
             "[bold white]db[/bold white]"
         )
         console.print("[dim]lobera.py <módulo> -h     →  opciones del módulo[/dim]")
@@ -631,6 +645,7 @@ def main():
         "rpc":      run_rpc,
         "ldap":     run_ldap,
         "winrm":    run_winrm,
+        "ssh":      run_ssh,
         "db":       run_db,
     }
     runner = dispatch.get(args.module)
