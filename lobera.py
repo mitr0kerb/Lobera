@@ -405,6 +405,11 @@ def build_parser():
         "--scanner", action="store_true",
         help="Modo autopwn interactivo SMB",
     )
+    
+        # ---- SSL ----
+    ssl_p = subs.add_parser("ssl", help="Consola interactiva de scripts SSL/TLS")
+    ssl_p.add_argument("--scanner", action="store_true",
+                       help="Modo autopwn interactivo SSL")
 
        # ---- SSH ----
     ssh = subs.add_parser("ssh", help="Consola interactiva de scripts SSH")
@@ -469,6 +474,14 @@ def run_smb(args):
         return
     from modules.smb_script_shell import SMBScriptShell
     SMBScriptShell(_ROOT).run()
+
+def run_ssl(args):
+    if getattr(args, "scanner", False):
+        from scripts.ssl.scanner import run_ssl_scanner
+        run_ssl_scanner(args)
+        return
+    from modules.ssl_script_shell import SSLScriptShell
+    SSLScriptShell(_ROOT).run()
 
 def run_ssh(args):
     if getattr(args, "scanner", False):
@@ -633,6 +646,7 @@ def main():
             "[bold yellow]ldap[/bold yellow] · "
             "[bold cyan]winrm[/bold cyan] · "
             "[bold turquoise2]ssh[/bold turquoise2] · "
+            "[bold gold1]ssl[/bold gold1] ·"
             "[bold white]db[/bold white]"
         )
         console.print("[dim]lobera.py <módulo> -h     →  opciones del módulo[/dim]")
@@ -646,6 +660,7 @@ def main():
         "ldap":     run_ldap,
         "winrm":    run_winrm,
         "ssh":      run_ssh,
+        "ssl":      run_ssl,
         "db":       run_db,
     }
     runner = dispatch.get(args.module)
