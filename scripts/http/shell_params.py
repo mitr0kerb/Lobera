@@ -1,0 +1,188 @@
+# scripts/http/shell_params.py
+
+EXPORT_FORMATS = ["json", "html", "xml", "yaml"]
+
+SCRIPT_PARAMS = {
+    # ── enum ──────────────────────────────────────────────────────────────────
+    "banner-grab": {
+        "description": "Obtiene headers del servidor HTTP y detecta tecnologías, versiones y WAF.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set port 80", "run"],
+    },
+    "tech-detect": {
+        "description": "Detecta CMS, frameworks, lenguajes, servidores y CDNs usados por la aplicación.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "dir-bruteforce": {
+        "description": "Fuerza bruta de directorios y ficheros. Detecta paneles de admin y rutas sensibles.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "wordlist", "delay", "extensions"],
+        "defaults": {"port": 80, "timeout": 5, "delay": 0},
+        "example": ["set target 10.10.10.5", "set wordlist /opt/wordlists/common.txt", "run"],
+    },
+    "cors-check": {
+        "description": "Detecta CORS misconfiguration: origins arbitrarios, null origin, credenciales con wildcard.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "ssl-redirect": {
+        "description": "Comprueba si el servidor redirige HTTP a HTTPS y si la redirección es correcta.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "robots-sitemap": {
+        "description": "Parsea robots.txt y sitemap.xml buscando rutas ocultas y paneles de admin.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "js-secrets": {
+        "description": "Script propio: descarga JS y busca API keys, tokens, endpoints internos y secretos hardcoded.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "http2-check": {
+        "description": "Script propio: detecta HTTP/2 y HTTP/3 via ALPN. Comprueba h2c upgrade inseguro.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "set port 443", "run"],
+    },
+    # ── attack ────────────────────────────────────────────────────────────────
+    "sqli-detect": {
+        "description": "Detección de SQL injection: error-based y time-based blind en parámetros GET.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "param"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/", "param": "id"},
+        "example": ["set target 10.10.10.5", "set path /search", "set param q", "run"],
+    },
+    "xss-detect": {
+        "description": "Detección de XSS reflejado en parámetros GET.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "param"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/", "param": "q"},
+        "example": ["set target 10.10.10.5", "set path /search", "set param q", "run"],
+    },
+    "lfi-detect": {
+        "description": "Detección de Local File Inclusion via path traversal y wrappers PHP.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "param"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/", "param": "file"},
+        "example": ["set target 10.10.10.5", "set path /index.php", "set param page", "run"],
+    },
+    "ssrf-detect": {
+        "description": "Detección de SSRF via parámetros URL con endpoints internos y metadatos cloud.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "param"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/", "param": "url"},
+        "example": ["set target 10.10.10.5", "set path /fetch", "set param url", "run"],
+    },
+    "header-injection": {
+        "description": "Detecta Host header injection y web cache poisoning via headers no cacheados.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "open-redirect": {
+        "description": "Detecta open redirects en parámetros comunes (redirect, url, next, return...).",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "param"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set path /login", "set param next", "run"],
+    },
+    "jwt-attack": {
+        "description": "Script propio: ataca JWT con alg=none, weak secret brute force y kid injection.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "jwt"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set jwt eyJ...", "run"],
+    },
+    "graphql-enum": {
+        "description": "Script propio: descubre endpoints GraphQL, lanza introspección y detecta tipos peligrosos.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "set path /graphql", "run"],
+    },
+    # ── exploit ───────────────────────────────────────────────────────────────
+    "log4shell": {
+        "description": "CVE-2021-44228: inyecta payloads JNDI en headers HTTP. Requiere listener OOB.",
+        "required": ["target", "listener"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set listener abc.interactsh.com", "run"],
+    },
+    "apache-path-traversal": {
+        "description": "CVE-2021-41773: path traversal y RCE en Apache 2.4.49 via mod_cgi.",
+        "required": ["target"],
+        "optional": ["port", "timeout"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "shellshock": {
+        "description": "CVE-2014-6271: RCE via Bash en headers HTTP a través de CGI.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "cgi_path"],
+        "defaults": {"port": 80, "timeout": 5},
+        "example": ["set target 10.10.10.5", "set cgi_path /cgi-bin/status.cgi", "run"],
+    },
+    "php-cgi-rce": {
+        "description": "CVE-2024-4577: PHP CGI argument injection en Windows → RCE sin auth.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "command"],
+        "defaults": {"port": 80, "timeout": 5, "command": "whoami"},
+        "example": ["set target 10.10.10.5", "set command id", "run"],
+    },
+    "http-request-smuggling": {
+        "description": "Script propio: detecta HTTP Request Smuggling (CL.TE y TE.CL) via timing.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 10, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    # ── post ──────────────────────────────────────────────────────────────────
+    "extract-links": {
+        "description": "Extrae links, formularios y API endpoints de la aplicación HTTP.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "crawl": {
+        "description": "Script propio: spider recursivo HTTP. Mapea estructura, rutas y parámetros.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "path", "max_depth", "max_pages"],
+        "defaults": {"port": 80, "timeout": 5, "path": "/", "max_depth": 3, "max_pages": 30},
+        "example": ["set target 10.10.10.5", "set max_depth 3", "run"],
+    },
+}
+
+PARAM_LABELS = {
+    "target":     "IP/hostname del objetivo",
+    "port":       "Puerto HTTP (default: 80)",
+    "timeout":    "Timeout de conexión (segundos)",
+    "path":       "Ruta HTTP (default: /)",
+    "param":      "Parámetro a inyectar",
+    "wordlist":   "Ruta al fichero de rutas",
+    "delay":      "Delay entre peticiones (segundos)",
+    "extensions": "Extensiones a probar (ej: php,asp,html)",
+    "listener":   "Dominio del listener OOB (interactsh...)",
+    "cgi_path":   "Ruta del script CGI",
+    "command":    "Comando a ejecutar (RCE)",
+    "jwt":        "Token JWT a atacar",
+    "max_depth":  "Profundidad máxima del crawler",
+    "max_pages":  "Páginas máximas del crawler",
+}
