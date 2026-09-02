@@ -405,6 +405,11 @@ def build_parser():
         "--scanner", action="store_true",
         help="Modo autopwn interactivo SMB",
     )
+
+        # ---- MSSQL ----
+    mssql = subs.add_parser("mssql", help="Consola interactiva de scripts MSSQL")
+    mssql.add_argument("--scanner", action="store_true",
+                       help="Modo autopwn interactivo MSSQL")
    
         # ---- FTP ----
     ftp_p = subs.add_parser("ftp", help="Consola interactiva de scripts FTP")
@@ -509,6 +514,15 @@ def run_smb(args):
         return
     from modules.smb_script_shell import SMBScriptShell
     SMBScriptShell(_ROOT).run()
+
+def run_mssql(args):
+    if getattr(args, "scanner", False):
+        from scripts.mssql.scanner import run_mssql_scanner
+        run_mssql_scanner(args)
+        return
+    from modules.mssql_script_shell import MSSQLScriptShell
+    MSSQLScriptShell(_ROOT).run()
+
 
 def run_http(args):
     from pathlib import Path
@@ -718,6 +732,7 @@ def main():
             "[bold bright_cyan]http[/bold bright_cyan] · "
             "[bold deep_sky_blue1]https[/bold deep_sky_blue1] · "
             "[bold orange1]ftp[/bold orange1] · "
+            "[bold bright_red]mssql[/bold bright_red] · "
             "[bold white]db[/bold white]"
         )
         console.print("[dim]lobera.py <módulo> -h     →  opciones del módulo[/dim]")
@@ -735,6 +750,7 @@ def main():
         "http":     run_http,
         "https":    run_https,
         "ftp":      run_ftp,
+        "mssql":    run_mssql,
         "db":       run_db,
     }
     runner = dispatch.get(args.module)
