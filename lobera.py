@@ -1,714 +1,390 @@
 #!/usr/bin/env python3
-# lobera.py
+# lobera.py — CLI principal de Lobera
+# Autor: mitr0kerb
 
-import argparse
-import ast
 import sys
-import importlib
-import pathlib
+from pathlib import Path
 
-from core.session_db import (
-    init_db, get_targets, get_findings, get_credentials, delete_target,
-)
-from core.target import Target
-from core.credentials import Creds
-from core.output import console, print_table
-from utils.banner import show_banner
-from rich.table import Table
-from rich.tree import Tree
+_ROOT = Path(__file__).parent
 
+from core.output import console
+from core.session_db import init_db
 
-# ============================================================
-# Configuración por módulo
-# ============================================================
+# ── Banner ────────────────────────────────────────────────────────────────────
 
-VERSION = "1.0"
-
-MODULE_CONFIG = {
-    "smb":      {"color": "green",   "label": "Sscripts", "proto": "SMB"},
-    "kerberos": {"color": "magenta", "label": "Kscripts", "proto": "KRB"},
-    "rpc":      {"color": "blue",    "label": "Rscripts", "proto": "RPC"},
-    "ldap":     {"color": "yellow",  "label": "Lscripts", "proto": "LDAP"},
-    "winrm":    {"color": "cyan",    "label": "Wscripts", "proto": "WINRM"},
-    "ssh":      {"color": "turquoise2", "label": "SSHscripts", "proto": "SSH"},
-}
-
-NO_TARGET_SCRIPTS = {
-    "kerberos": {"golden-ticket", "silver-ticket", "pass-the-ticket"},
-}
-
-# Ruta raíz del proyecto (donde vive lobera.py)
-_ROOT = pathlib.Path(__file__).parent
-
-
-# ============================================================
-# Banner de módulo
-# ============================================================
-
-def _print_module_banner(module):
+def show_banner():
     import pyfiglet
-    cfg   = MODULE_CONFIG.get(module, {"color": "white", "label": module.upper()})
-    color = cfg["color"]
-    label = cfg["label"]
-    art   = pyfiglet.figlet_format(label, font="slant")
-    console.print(f"[bold {color}]{art}[/bold {color}]")
-    console.print(
-        f"[dim]  módulo [bold {color}]{module.upper()}[/bold {color}] — "
-        f"lobera.py {module} --script=<nombre> -t <ip>[/dim]\n"
-    )
+    art = pyfiglet.figlet_format("LOBERA", font="slant")
+    console.print(f"[bold cyan]{art}[/bold cyan]")
+    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL[/dim]")
+    console.print("[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
+# ── Tablas de shells / scanners ───────────────────────────────────────────────
 
-# ============================================================
-# Helpers comunes
-# ============================================================
+_PROTO_COLORS = {
+    "smb":      "green",
+    "kerberos": "magenta",
+    "rpc":      "blue",
+    "ldap":     "yellow",
+    "winrm":    "cyan",
+    "ssh":      "turquoise2",
+    "ssl":      "gold1",
+    "http":     "bright_cyan",
+    "https":    "deep_sky_blue1",
+    "ftp":      "orange1",
+    "mssql":    "bright_red",
+}
 
-def add_common_args(parser):
-    parser.add_argument("-t", "--target",   default=None, help="IP o hostname del objetivo")
-    parser.add_argument("-u", "--user",     default="",   help="Usuario")
-    parser.add_argument("-p", "--password", default="",   help="Contraseña")
-    parser.add_argument("-H", "--hash",     default=None, help="Hash NT (o LM:NT)")
-    parser.add_argument("-d", "--domain",   default="",   help="Dominio FQDN")
-    parser.add_argument("-k", "--kerberos", action="store_true", dest="use_kerberos",
-                        help="Autenticar con ticket Kerberos (KRB5CCNAME del entorno)")
-    parser.add_argument("--ccache",  default=None, metavar="FILE",
-                        help="Ruta al fichero .ccache")
-    parser.add_argument("--timeout", type=int, default=5,
-                        help="Timeout de conexión en segundos (default: 5)")
+_SHELL_CLASSES = {
+    "smb":      ("modules.smb_script_shell",      "SMBScriptShell"),
+    "kerberos": ("modules.kerberos_script_shell",  "KerberosScriptShell"),
+    "rpc":      ("modules.rpc_script_shell",       "RPCScriptShell"),
+    "ldap":     ("modules.ldap_script_shell",      "LDAPScriptShell"),
+    "winrm":    ("modules.winrm_script_shell",     "WinRMScriptShell"),
+    "ssh":      ("modules.ssh_script_shell",       "SSHScriptShell"),
+    "ssl":      ("modules.ssl_script_shell",       "SSLScriptShell"),
+    "http":     ("modules.http_script_shell",      "HTTPScriptShell"),
+    "https":    ("modules.https_script_shell",     "HTTPSScriptShell"),
+    "ftp":      ("modules.ftp_script_shell",       "FTPScriptShell"),
+    "mssql":    ("modules.mssql_script_shell",     "MSSQLScriptShell"),
+}
 
+_SCANNER_FUNCS = {
+    "smb":      ("scripts.smb.scanner",       "run_smb_scanner"),
+    "kerberos": ("scripts.kerberos.scanner",  "run_kerberos_scanner"),
+    "rpc":      ("scripts.rpc.scanner",       "run_rpc_scanner"),
+    "ldap":     ("scripts.ldap.scanner",      "run_ldap_scanner"),
+    "winrm":    ("scripts.winrm.scanner",     "run_winrm_scanner"),
+    "ssh":      ("scripts.ssh.scanner",       "run_ssh_scanner"),
+    "ssl":      ("scripts.ssl.scanner",       "run_ssl_scanner"),
+    "http":     ("scripts.http.scanner",      "run_http_scanner"),
+    "https":    ("scripts.https.scanner",     "run_https_scanner"),
+    "ftp":      ("scripts.ftp.scanner",       "run_ftp_scanner"),
+    "mssql":    ("scripts.mssql.scanner",     "run_mssql_scanner"),
+}
 
-def require_target(args, script_name=None, module=None):
-    exempt = NO_TARGET_SCRIPTS.get(module or "", set())
-    if script_name and script_name in exempt:
-        return True
-    if not args.target:
-        console.print("[red]Falta -t/--target (obligatorio para este script).[/red]")
-        return False
-    return True
+# ── Dispatcher genérico ───────────────────────────────────────────────────────
 
+def _run_proto(protocol, args):
+    root  = _ROOT
+    color = _PROTO_COLORS.get(protocol, "white")
 
-def make_target(args):
-    return Target(ip=args.target or "", domain=args.domain, timeout=args.timeout)
+    scanner     = getattr(args, "scanner",           False)
+    inter_shell = getattr(args, "interactive_shell", False)
+    script      = getattr(args, "script",            None)
+    script_fam  = getattr(args, "script_fam",        None)
 
-
-def make_creds(args):
-    ccache = None
-    if getattr(args, "use_kerberos", False):
-        import os
-        ccache = getattr(args, "ccache", None) or os.environ.get("KRB5CCNAME")
-    return Creds(
-        user=args.user,
-        password=args.password,
-        domain=args.domain,
-        hash=args.hash,
-        ccache=ccache,
-    )
-
-
-def detect_hash_format(secret, secret_type):
-    if secret_type == "null":     return "null session"
-    if secret_type == "password": return "texto claro"
-    if secret_type == "hash":
-        if secret and ":" in secret:
-            _, nt = secret.split(":", 1)
-            return "LM:NTLM" if len(nt) == 32 else "LM:NT"
-        if secret and len(secret) == 32:
-            return "NTLM (32 hex)"
-        return "hash (desconocido)"
-    return secret_type or "desconocido"
-
-
-# ============================================================
-# Script loader — dos capas:
-#   1. _script_metadata()  → AST, sin importar, para el árbol
-#   2. _import_script_cls() → import real, solo al ejecutar
-# ============================================================
-
-class _ScriptMeta:
-    """
-    Objeto ligero con los metadatos de un script extraídos por AST.
-    Se usa en el árbol de scripts (lobera.py smb) sin importar el módulo.
-    """
-    __slots__ = ("name", "description", "category", "path")
-
-    def __init__(self, name, description, category, path):
-        self.name        = name
-        self.description = description
-        self.category    = category
-        self.path        = path          # pathlib.Path al fichero .py
-
-def _script_metadata(py_path):
-    """
-    Extrae name, description, category de un script leyendo el AST
-    sin importarlo. Funciona con cualquier nombre de clase que herede
-    de BaseScript (SharesScript, UserEnumScript, Script, etc.).
-    """
-    try:
-        source = py_path.read_text(encoding="utf-8", errors="replace")
-        tree   = ast.parse(source, filename=str(py_path))
-    except Exception:
-        return None
-
-    meta = {"name": None, "description": None, "category": None}
-
-    for node in ast.walk(tree):
-        # Cualquier clase que herede de algo (tiene al menos una base)
-        if isinstance(node, ast.ClassDef) and node.bases:
-            for item in node.body:
-                if isinstance(item, ast.Assign):
-                    for target in item.targets:
-                        if (isinstance(target, ast.Name)
-                                and target.id in meta
-                                and isinstance(item.value, ast.Constant)):
-                            meta[target.id] = item.value.value
-            # Primera clase con bases que tenga name definido
-            if meta["name"] is not None:
-                break
-
-    if meta["name"] is None:
-        meta["name"] = py_path.stem
-
-    return _ScriptMeta(
-        name        = meta["name"],
-        description = meta["description"] or "",
-        category    = meta["category"] or py_path.parent.name,
-        path        = py_path,
-    )
-
-
-def _import_script_cls(py_path):
-    """
-    Importa el fichero .py y devuelve la clase Script.
-    Se llama SOLO cuando el usuario ejecuta un script, no para el árbol.
-    Añade _ROOT al sys.path si es necesario.
-    """
-    root_str = str(_ROOT)
-    if root_str not in sys.path:
-        sys.path.insert(0, root_str)
-
-    rel      = py_path.relative_to(_ROOT)
-    mod_path = str(rel).replace("/", ".").replace("\\", ".")[:-3]  # quitar .py
-
-    try:
-        mod = importlib.import_module(mod_path)
-        return getattr(mod, "Script", None)
-    except Exception as exc:
-        console.print(f"[red]Error importando {mod_path}: {exc}[/red]")
-        return None
-
-
-# ============================================================
-# Funciones de descubrimiento de scripts
-# ============================================================
-
-def _get_tree_meta(module):
-    """
-    Devuelve dict {family_name: [_ScriptMeta, ...]} para todos los scripts
-    del módulo, usando AST (sin importar nada).
-    """
-    scripts_root = _ROOT / "scripts" / module
-    result = {}
-    if not scripts_root.is_dir():
-        return result
-
-    for family_dir in sorted(scripts_root.iterdir()):
-        if not family_dir.is_dir() or family_dir.name.startswith("_"):
-            continue
-        metas = []
-        for py in sorted(family_dir.glob("*.py")):
-            if py.name == "__init__.py":
-                continue
-            meta = _script_metadata(py)
-            if meta:
-                metas.append(meta)
-        if metas:
-            result[family_dir.name] = metas
-    return result
-
-
-def _find_script_path(module, name):
-    """
-    Busca el fichero .py cuyo campo name == <name> o cuyo stem == <name>
-    dentro de scripts/<module>/**/*.py, usando AST.
-    Devuelve pathlib.Path o None.
-    """
-    scripts_root = _ROOT / "scripts" / module
-    if not scripts_root.is_dir():
-        return None
-
-    for py in scripts_root.rglob("*.py"):
-        if py.name == "__init__.py":
-            continue
-        if py.stem == name:
-            return py
-        # Comprobar el campo name= dentro del fichero
-        meta = _script_metadata(py)
-        if meta and meta.name == name:
-            return py
-    return None
-
-
-def _get_family_paths(module, family):
-    """
-    Devuelve lista de pathlib.Path de scripts en scripts/<module>/<family>/.
-    """
-    family_dir = _ROOT / "scripts" / module / family
-    if not family_dir.is_dir():
-        return []
-    return [py for py in sorted(family_dir.glob("*.py"))
-            if py.name != "__init__.py"]
-
-
-# ============================================================
-# Árbol visual
-# ============================================================
-def _print_module_tree(module):
-    _print_module_banner(module)
-
-    cfg       = MODULE_CONFIG.get(module, {"color": "white"})
-    color     = cfg["color"]
-    tree_data = _get_tree_meta(module)
-
-    if not tree_data:
-        console.print(f"[yellow]No hay scripts disponibles para el módulo '{module}'.[/yellow]")
-        console.print(f"[dim]  (buscando en: {_ROOT / 'scripts' / module})[/dim]")
+    if scanner:
+        mod_name, func_name = _SCANNER_FUNCS[protocol]
+        mod  = __import__(mod_name, fromlist=[func_name])
+        func = getattr(mod, func_name)
+        func(args)
         return
 
-    from rich.text import Text
-    tree = Tree(f"[bold {color}]{module.upper()}[/bold {color}]")
-    for family, metas in tree_data.items():
-        branch = tree.add(f"[bold {color}]{family}[/bold {color}]")
-        for m in metas:
-            label = Text()
-            label.append(m.name, style="bold white")
-            label.append("  ")
-            label.append(m.description, style="dim")
-            branch.add(label)
-    console.print(tree, overflow="fold")
-    console.print(f"\n[dim]lobera.py {module} --script=<nombre> -t <ip> [opciones][/dim]")
-# ============================================================
-# Ejecución
-# ============================================================
-
-def _run_script_cls(cls, target, creds, **kwargs):
-    try:
-        script = cls(target, creds)
-        script.run(**kwargs)
-    except KeyboardInterrupt:
-        console.print("\n[dim]Script interrumpido.[/dim]")
-    except Exception as exc:
-        name = getattr(cls, "name", cls.__name__)
-        console.print(f"[red]Error ejecutando {name}: {exc}[/red]")
-
-
-def _show_script_examples(cls):
-    examples    = getattr(cls, "EXAMPLES", [])
-    script_name = getattr(cls, "name", "?")
-    if not examples:
-        console.print(f"[yellow]No hay ejemplos para '{script_name}'.[/yellow]")
-        return
-    t = Table(title=f"Ejemplos — {script_name}")
-    t.add_column("Parámetro", style="cyan")
-    t.add_column("Qué hace")
-    t.add_column("[green]Buen uso[/green]")
-    t.add_column("[red]Mal uso[/red]")
-    for ex in examples:
-        t.add_row(ex.get("flag",""), ex.get("desc",""),
-                  ex.get("good",""), ex.get("bad",""))
-    console.print(t)
-
-
-def run_module_generic(module_name, args):
-    script_name  = getattr(args, "script",     None)
-    script_fam   = getattr(args, "script_fam", None)
-    show_example = getattr(args, "example",    False)
-
-    if not script_name and not script_fam:
-        _print_module_tree(module_name)
+    if inter_shell:
+        mod_name, cls_name = _SHELL_CLASSES[protocol]
+        mod = __import__(mod_name, fromlist=[cls_name])
+        cls = getattr(mod, cls_name)
+        cls(root).run()
         return
 
-    target = make_target(args)
-    creds  = make_creds(args)
-    extra  = _build_extra_kwargs(args)
+    from modules.classic import list_scripts, run_script, run_script_family
 
-    if script_name:
-        py_path = _find_script_path(module_name, script_name)
-        if py_path is None:
-            console.print(f"[red]Script '{script_name}' no encontrado en '{module_name}'.[/red]")
+    if script:
+        # Modo clásico: muestra params si faltan, ejecuta si están todos
+        run_script(protocol, script, root, color, args)
+        return
+
+    if script_fam:
+        run_script_family(protocol, script_fam, root, color, args)
+        return
+
+    # Sin flags: listar scripts
+    list_scripts(protocol, root, color)
+
+
+# ── Funciones por protocolo ───────────────────────────────────────────────────
+
+def run_smb(args):      _run_proto("smb",      args)
+def run_kerberos(args): _run_proto("kerberos", args)
+def run_rpc(args):      _run_proto("rpc",      args)
+def run_ldap(args):     _run_proto("ldap",     args)
+def run_winrm(args):    _run_proto("winrm",    args)
+def run_ssh(args):      _run_proto("ssh",      args)
+def run_ssl(args):      _run_proto("ssl",      args)
+def run_http(args):     _run_proto("http",     args)
+def run_https(args):    _run_proto("https",    args)
+def run_ftp(args):      _run_proto("ftp",      args)
+def run_mssql(args):    _run_proto("mssql",    args)
+
+# ── db ────────────────────────────────────────────────────────────────────────
+
+def run_db(args):
+    from core.session_db import (get_targets, get_findings,
+                                  get_credentials, delete_target)
+    from core.output import print_table
+
+    action = getattr(args, "db_action", None)
+
+    if action == "targets":
+        targets = get_targets()
+        if not targets:
+            console.print("[yellow]No hay ningún objetivo guardado.[/yellow]")
             return
-        cls = _import_script_cls(py_path)
-        if cls is None:
-            return
-        if show_example:
-            _show_script_examples(cls)
-            return
-        if not require_target(args, script_name, module_name):
-            return
-        _run_script_cls(cls, target, creds, **extra)
+        rows = [(t["ip"], t["domain"] or "-", t["hostname"] or "-", t["first_seen"])
+                for t in targets]
+        print_table("Objetivos vistos", ["IP", "Dominio", "Hostname", "Primera vez"], rows)
 
-    elif script_fam:
-        for fam in script_fam.split("/"):
-            fam   = fam.strip()
-            paths = _get_family_paths(module_name, fam)
-            if not paths:
-                console.print(f"[yellow]Familia '{fam}' no encontrada en '{module_name}'.[/yellow]")
-                continue
-            for py_path in paths:
-                meta = _script_metadata(py_path)
-                sname = meta.name if meta else py_path.stem
-                if not require_target(args, sname, module_name):
-                    continue
-                cls = _import_script_cls(py_path)
-                if cls:
-                    _run_script_cls(cls, target, creds, **extra)
+    elif action == "findings":
+        if not args.target:
+            console.print("[red]Falta -t/--target.[/red]"); return
+        findings = get_findings(args.target)
+        if getattr(args, "protocol", None):
+            findings = [f for f in findings if f["protocol"] == args.protocol]
+        if not findings:
+            console.print(f"[yellow]Sin hallazgos para {args.target}.[/yellow]"); return
+        rows = [(f["protocol"], f["finding_type"], f["detail"], f["timestamp"])
+                for f in findings]
+        print_table(f"Hallazgos para {args.target}",
+                    ["Protocolo", "Tipo", "Detalle", "Timestamp"], rows)
 
+    elif action == "creds":
+        if not args.target:
+            console.print("[red]Falta -t/--target.[/red]"); return
+        creds = get_credentials(args.target, only_valid=not getattr(args, "all", False))
+        if not creds:
+            console.print(f"[yellow]Sin credenciales para {args.target}.[/yellow]"); return
+        show_secret = getattr(args, "show_secret", False)
+        rows = []
+        for c in creds:
+            secret = c["secret"] if show_secret else ("*" * 8 if c["secret"] else "")
+            rows.append((c["user"] or "(vacío)", secret, c["secret_type"],
+                         "Sí" if c["valid"] else "No", c["source"], c["timestamp"]))
+        print_table(f"Credenciales para {args.target}",
+                    ["Usuario", "Secreto", "Tipo", "Válida", "Origen", "Timestamp"], rows)
+        if not show_secret:
+            console.print("[dim]Secretos ocultos. Usa --show-secret para verlos.[/dim]")
 
-# ============================================================
-# kwargs extra
-# ============================================================
+    elif action == "delete":
+        if not args.target:
+            console.print("[red]Falta -t/--target.[/red]"); return
+        findings = get_findings(args.target)
+        creds    = get_credentials(args.target, only_valid=False)
+        targets  = [t for t in get_targets() if t["ip"] == args.target]
+        if not targets and not findings and not creds:
+            console.print(f"[yellow]Nada guardado para {args.target}.[/yellow]"); return
+        console.print(f"[bold red]Vas a borrar TODO para {args.target}:[/bold red]")
+        console.print(f"  • {len(targets)} target(s)")
+        console.print(f"  • {len(creds)} credencial(es)")
+        console.print(f"  • {len(findings)} finding(s)")
+        console.print("[bold red]Irreversible.[/bold red]\n")
+        if not getattr(args, "yes", False):
+            answer = console.input("¿Estás seguro? Escribe [bold]sí[/bold]: ").strip().lower()
+            if answer not in ("si", "sí", "s", "yes", "y"):
+                console.print("[yellow]Cancelado.[/yellow]"); return
+        counts = delete_target(args.target)
+        console.print(f"[green]Borrado: {sum(counts.values())} fila(s) eliminadas.[/green]")
 
-def _build_extra_kwargs(args):
-    _skip = {"module", "db_action", "script", "script_fam", "example",
-             "target", "user", "password", "hash", "domain", "timeout",
-             "use_kerberos"}
-    extra = {k: v for k, v in vars(args).items() if k not in _skip}
-    extra["use_kerberos"] = getattr(args, "use_kerberos", False)
-    return extra
+    else:
+        console.print("[yellow]Acciones disponibles: targets, findings, creds, delete[/yellow]")
+        console.print("[dim]lobera.py db <acción> -h[/dim]")
 
+# ── Parser ────────────────────────────────────────────────────────────────────
 
-# ============================================================
-# Parsers
-# ============================================================
-
-def _add_script_args(p):
+def _add_proto_flags(p):
+    """
+    Flags de modo (cómo lanzar el módulo) + todos los parámetros posibles
+    de todos los scripts, para que el modo clásico los pueda recibir por CLI.
+    """
+    # ── modos ────────────────────────────────────────────────────────────────
+    p.add_argument("--scanner",           action="store_true",
+                   help="Autopwn scanner interactivo")
+    p.add_argument("--interactive-shell", action="store_true",
+                   dest="interactive_shell",
+                   help="Consola interactiva de scripts")
     p.add_argument("--script",     default=None, metavar="NOMBRE",
-                   help="Script a ejecutar")
-    p.add_argument("--script-fam", default=None, dest="script_fam",
-                   metavar="FAMILIA[/FAMILIA2]",
-                   help="Ejecuta todos los scripts de una familia")
-    p.add_argument("--example",    action="store_true",
-                   help="Muestra ejemplos del script indicado en --script")
+                   help="Ejecuta un script por nombre")
+    p.add_argument("--script-fam", default=None, metavar="FAMILIA",
+                   dest="script_fam",
+                   help="Ejecuta toda una familia de scripts")
+
+    # ── credenciales / target base (comunes a casi todos los scripts) ─────────
+    p.add_argument("-t", "--target",   default=None,   help="IP/hostname del objetivo")
+    p.add_argument("-u", "--user",     default=None,   help="Usuario")
+    p.add_argument("-p", "--password", default=None,   help="Contraseña")
+    p.add_argument("-H", "--hash",     default=None,   help="Hash NT (pass-the-hash)")
+    p.add_argument("-d", "--domain",   default=None,   help="Dominio FQDN")
+    p.add_argument("--timeout",        default=None, type=int, help="Timeout (segundos)")
+
+    # ── red / servicio ────────────────────────────────────────────────────────
+    p.add_argument("--port",           default=None, type=int, help="Puerto del servicio")
+    p.add_argument("--instance",       default=None,   help="Nombre de instancia (MSSQL)")
+    p.add_argument("--ldaps",          action="store_true", default=False, help="Usar LDAPS")
+    p.add_argument("--ssl",            action="store_true", default=False, help="Usar SSL")
+    p.add_argument("--sni",            default=None,   help="Server Name Indication (HTTPS)")
+    p.add_argument("--http-port",      default=None, type=int, dest="http_port",
+                   help="Puerto HTTP (para TLS stripping)")
+
+    # ── ficheros / listas ─────────────────────────────────────────────────────
+    p.add_argument("--userlist",       default=None,   help="Wordlist de usuarios")
+    p.add_argument("--passlist",       default=None,   help="Wordlist de passwords")
+    p.add_argument("--wordlist",       default=None,   help="Wordlist genérica (dir brute, etc.)")
+
+    # ── SMB específico ────────────────────────────────────────────────────────
+    p.add_argument("--share",          default=None,   help="Share SMB concreto")
+    p.add_argument("--ext",            default=None,   help="Extensiones a buscar (ej: .txt,.kdbx)")
+    p.add_argument("--keywords",       default=None,   help="Palabras clave en nombres de fichero")
+    p.add_argument("--depth",          default=None, type=int, help="Profundidad de recursión")
+
+    # ── Kerberos específico ───────────────────────────────────────────────────
+    p.add_argument("--spn",            default=None,   help="SPN objetivo (ej: cifs/DC01.CORP.LOCAL)")
+    p.add_argument("--ccache",         default=None,   help="Ruta al fichero .ccache")
+    p.add_argument("--kirbi",          default=None,   help="Ruta al fichero .kirbi")
+    p.add_argument("--krbtgt-hash",    default=None, dest="krbtgt_hash",
+                   help="Hash NT del krbtgt")
+    p.add_argument("--service-hash",   default=None, dest="service_hash",
+                   help="Hash NT de la cuenta de servicio")
+    p.add_argument("--domain-sid",     default=None, dest="domain_sid",
+                   help="SID del dominio (S-1-5-21-...)")
+    p.add_argument("--user-id",        default=None, type=int, dest="user_id",
+                   help="RID del usuario a impersonar (default: 500)")
+    p.add_argument("--groups",         default=None,
+                   help="RIDs de grupos separados por coma")
+    p.add_argument("--target-user",    default=None, dest="target_user",
+                   help="Usuario objetivo a impersonar")
+    p.add_argument("--target-computer",default=None, dest="target_computer",
+                   help="Nombre del equipo objetivo")
+    p.add_argument("--attacker-account",default=None, dest="attacker_account",
+                   help="Cuenta controlada por el atacante")
+    p.add_argument("--cert",           default=None,   help="Ruta al certificado .pem")
+    p.add_argument("--pfx",            default=None,   help="Ruta al certificado .pfx")
+    p.add_argument("--template",       default=None,   help="Plantilla ADCS")
+    p.add_argument("--ca",             default=None,   help="CA authority (ej: CORP-CA)")
+    p.add_argument("--alt-name",       default=None, dest="alt_name",
+                   help="Nombre alternativo para el certificado")
+    p.add_argument("--dc-name",        default=None, dest="dc_name",
+                   help="Nombre del DC (para noPac)")
+    p.add_argument("--user-sid",       default=None, dest="user_sid",
+                   help="SID del usuario (para ms14-068)")
+    p.add_argument("--vector",         default=None,
+                   help="Vector de ataque (kerber-loss)")
+    p.add_argument("--new-password",   default=None, dest="new_password",
+                   help="Nueva contraseña a establecer")
+
+    # ── LDAP específico ───────────────────────────────────────────────────────
+    p.add_argument("--target-dn",      default=None, dest="target_dn",
+                   help="DN del objeto LDAP objetivo")
+    p.add_argument("--target-obj",     default=None, dest="target_obj",
+                   help="DN/sAMAccountName objetivo (acl-abuse)")
+    p.add_argument("--out-dir",        default=None, dest="out_dir",
+                   help="Directorio de salida (bloodhound)")
+    p.add_argument("--save-list",      default=None, dest="save_list",
+                   help="Ruta para guardar lista resultante")
+    p.add_argument("--filter-flag",    default=None, dest="filter_flag",
+                   help="Filtro por flag UAC")
+    p.add_argument("--enabled-only",   action="store_true", default=False,
+                   dest="enabled_only", help="Solo cuentas habilitadas")
+    p.add_argument("--privileged-only",action="store_true", default=False,
+                   dest="privileged_only", help="Solo grupos privilegiados")
+    p.add_argument("--os-filter",      default=None, dest="os_filter",
+                   help="Filtro por sistema operativo")
+    p.add_argument("--undeleg",        action="store_true", default=False,
+                   help="Solo equipos con delegación sin restricciones")
+    p.add_argument("--action",         default=None,
+                   help="Acción ACL (detect/reset-password/add-member/...)")
+    p.add_argument("--source-user",    default=None, dest="source_user",
+                   help="Usuario origen del ACE")
+    p.add_argument("--save-key",       default=None, dest="save_key",
+                   help="Ruta para guardar clave privada (shadow-creds)")
+    p.add_argument("--mode",           default=None,
+                   help="Modo relay (add-da/rbcd/dump/shadow-creds)")
+    p.add_argument("--relay-target-user", default=None, dest="relay_target_user",
+                   help="Usuario objetivo del relay")
+    p.add_argument("--continue-on-lockout", action="store_true", default=False,
+                   dest="continue_on_lockout",
+                   help="Continuar aunque se detecte lockout")
+
+    # ── MSSQL específico ──────────────────────────────────────────────────────
+    p.add_argument("--command",        default=None,
+                   help="Comando OS a ejecutar (xp_cmdshell)")
+    p.add_argument("--query",          default=None,
+                   help="Query SQL arbitraria")
+    p.add_argument("--attacker-ip",    default=None, dest="attacker_ip",
+                   help="IP del atacante (NTLM steal)")
+
+    # ── FTP específico ────────────────────────────────────────────────────────
+    p.add_argument("--delay",          default=None, type=float,
+                   help="Delay entre intentos (segundos)")
+
+    # ── HTTP/HTTPS específico ─────────────────────────────────────────────────
+    p.add_argument("--path",           default=None,
+                   help="Ruta HTTP inicial (default: /)")
+    p.add_argument("--param",          default=None,
+                   help="Parámetro a inyectar (sqli, xss, lfi, ssrf)")
+    p.add_argument("--listener",       default=None,
+                   help="Dominio OOB para log4shell")
+    p.add_argument("--client-id",      default=None, dest="client_id",
+                   help="Client ID OAuth (oauth-misconfig)")
+    p.add_argument("--max-depth",      default=None, type=int, dest="max_depth",
+                   help="Profundidad máxima de crawling")
+    p.add_argument("--max-pages",      default=None, type=int, dest="max_pages",
+                   help="Páginas máximas de crawling")
 
 
 def build_parser():
+    import argparse
     parser = argparse.ArgumentParser(
         prog="lobera",
-        description=f"Lobera {VERSION} — pentest AD modular",
+        description="Lobera — AD enumeration & attack toolkit",
     )
     subs = parser.add_subparsers(dest="module", metavar="módulo")
 
-        # ---- SMB ----
-    smb = subs.add_parser(
-        "smb",
-        help="Consola interactiva de scripts SMB",
-    )
-    smb.add_argument(
-        "--scanner", action="store_true",
-        help="Modo autopwn interactivo SMB",
-    )
+    # ── Protocolos ──────────────────────────────────────────────────────────
+    proto_help = {
+        "smb":      "Scripts SMB",
+        "kerberos": "Scripts Kerberos",
+        "rpc":      "Scripts RPC",
+        "ldap":     "Scripts LDAP",
+        "winrm":    "Scripts WinRM",
+        "ssh":      "Scripts SSH",
+        "ssl":      "Scripts SSL",
+        "http":     "Scripts HTTP",
+        "https":    "Scripts HTTPS",
+        "ftp":      "Scripts FTP",
+        "mssql":    "Scripts MSSQL",
+    }
+    for proto, help_text in proto_help.items():
+        p = subs.add_parser(proto, help=help_text)
+        _add_proto_flags(p)
 
-        # ---- MSSQL ----
-    mssql = subs.add_parser("mssql", help="Consola interactiva de scripts MSSQL")
-    mssql.add_argument("--scanner", action="store_true",
-                       help="Modo autopwn interactivo MSSQL")
-   
-        # ---- FTP ----
-    ftp_p = subs.add_parser("ftp", help="Consola interactiva de scripts FTP")
-    ftp_p.add_argument("--scanner", action="store_true",
-                       help="Modo autopwn interactivo FTP")
-        # ---- SSL ----
-    ssl_p = subs.add_parser("ssl", help="Consola interactiva de scripts SSL/TLS")
-    ssl_p.add_argument("--scanner", action="store_true",
-                       help="Modo autopwn interactivo SSL")
+    # ── db ──────────────────────────────────────────────────────────────────
+    db_p = subs.add_parser("db", help="Base de datos de sesión")
+    db_s = db_p.add_subparsers(dest="db_action", metavar="acción")
 
-       # ---- SSH ----
-    ssh = subs.add_parser("ssh", help="Consola interactiva de scripts SSH")
-    ssh.add_argument("--scanner", action="store_true",
-                     help="Modo autopwn interactivo SSH")
+    db_s.add_parser("targets", help="Lista objetivos")
 
-        # ---- Kerberos ----
-    krb = subs.add_parser("kerberos", help="Consola interactiva de scripts Kerberos")
-    krb.add_argument("--scanner", action="store_true",
-                     help="Modo autopwn interactivo Kerberos")
-    
-        # ---- RPC ----
-    rpc = subs.add_parser("rpc", help="Consola interactiva de scripts RPC")
-    rpc.add_argument("--scanner", action="store_true",
-                     help="Modo autopwn interactivo RPC")
+    db_findings = db_s.add_parser("findings", help="Lista hallazgos de un objetivo")
+    db_findings.add_argument("-t", "--target",  default=None)
+    db_findings.add_argument("--protocol",      default=None)
 
-       # ---- LDAP ----
-    ldap = subs.add_parser("ldap", help="Consola interactiva de scripts LDAP")
-    ldap.add_argument("--scanner", action="store_true",
-                      help="Modo autopwn interactivo LDAP")
+    db_creds = db_s.add_parser("creds", help="Lista credenciales de un objetivo")
+    db_creds.add_argument("-t", "--target",     default=None)
+    db_creds.add_argument("--all",              action="store_true")
+    db_creds.add_argument("--show-secret",      action="store_true", dest="show_secret")
 
-        # ── http ──────────────────────────────────────────────────────────────────
-    http_p = subs.add_parser(
-        "http",
-        help="Consola interactiva HTTP (enum, attack, exploit, post)"
-    )
-    http_p.add_argument("--scanner",  action="store_true",
-                        help="Lanza el autopwn scanner en lugar de la consola")
-    http_p.add_argument("-t","--target",  default=None)
-    http_p.add_argument("--port",         type=int, default=80)
-    http_p.add_argument("--path",         default="/")
-    http_p.add_argument("--param",        default=None)
-    http_p.add_argument("--wordlist",     default=None)
-    http_p.add_argument("--listener",     default=None)
-
-    # ── https ─────────────────────────────────────────────────────────────────
-    https_p = subs.add_parser(
-        "https",
-        help="Consola interactiva HTTPS (enum, attack, exploit, post)"
-    )
-    https_p.add_argument("--scanner",  action="store_true",
-                         help="Lanza el autopwn scanner en lugar de la consola")
-    https_p.add_argument("-t","--target",  default=None)
-    https_p.add_argument("--port",         type=int, default=443)
-    https_p.add_argument("--sni",          default=None)
-    https_p.add_argument("--path",         default="/")
-    https_p.add_argument("--param",        default=None)
-    https_p.add_argument("--wordlist",     default=None)
-    https_p.add_argument("--listener",     default=None)
-    https_p.add_argument("--client-id",    default=None, dest="client_id")
-    https_p.add_argument("--http-port",    type=int, default=80, dest="http_port")
-    
-        # ---- WinRM ----
-    winrm = subs.add_parser("winrm", help="Consola interactiva de scripts WinRM")
-    winrm.add_argument("--scanner", action="store_true",
-                       help="Modo autopwn interactivo WinRM")
-
-
-    # ---- DB ----
-    db      = subs.add_parser("db", help="Base de datos de sesión")
-    db_subs = db.add_subparsers(dest="db_action", metavar="acción")
-
-    dbt = db_subs.add_parser("targets")
-    dbt.add_argument("--example", action="store_true")
-
-    dbf = db_subs.add_parser("findings")
-    dbf.add_argument("-t","--target", default=None)
-    dbf.add_argument("--protocol",   default=None)
-    dbf.add_argument("--example",    action="store_true")
-
-    dbc = db_subs.add_parser("creds")
-    dbc.add_argument("-t","--target",  default=None)
-    dbc.add_argument("--all",          action="store_true")
-    dbc.add_argument("--show-secret",  action="store_true", dest="show_secret")
-    dbc.add_argument("--example",      action="store_true")
-
-    dbd = db_subs.add_parser("delete")
-    dbd.add_argument("-t","--target", default=None)
-    dbd.add_argument("--yes",         action="store_true")
-    dbd.add_argument("--example",     action="store_true")
+    db_delete = db_s.add_parser("delete", help="Borra todo lo de un objetivo")
+    db_delete.add_argument("-t", "--target",    default=None)
+    db_delete.add_argument("--yes",             action="store_true")
 
     return parser
 
+# ── main ──────────────────────────────────────────────────────────────────────
 
-# ============================================================
-# Runners
-# ============================================================
-
-def run_smb(args):
-    if getattr(args, "scanner", False):
-        from scripts.smb.scanner import run_smb_scanner
-        run_smb_scanner(args)
-        return
-    from modules.smb_script_shell import SMBScriptShell
-    SMBScriptShell(_ROOT).run()
-
-def run_mssql(args):
-    if getattr(args, "scanner", False):
-        from scripts.mssql.scanner import run_mssql_scanner
-        run_mssql_scanner(args)
-        return
-    from modules.mssql_script_shell import MSSQLScriptShell
-    MSSQLScriptShell(_ROOT).run()
-
-
-def run_http(args):
-    from pathlib import Path
-    _ROOT = Path(__file__).parent
-    if getattr(args, "scanner", False):
-        from scripts.http.scanner import run_http_scanner
-        run_http_scanner(args)
-        return
-    from modules.http_script_shell import HTTPScriptShell
-    HTTPScriptShell(_ROOT).run()
-
-
-def run_https(args):
-    from pathlib import Path
-    _ROOT = Path(__file__).parent
-    if getattr(args, "scanner", False):
-        from scripts.https.scanner import run_https_scanner
-        run_https_scanner(args)
-        return
-    from modules.https_script_shell import HTTPSScriptShell
-    HTTPSScriptShell(_ROOT).run()
-
-def run_ftp(args):
-    from pathlib import Path
-    _ROOT = Path(__file__).parent
-    if getattr(args, "scanner", False):
-        from scripts.ftp.scanner import run_ftp_scanner
-        run_ftp_scanner(args)
-        return
-    from modules.ftp_script_shell import FTPScriptShell
-    FTPScriptShell(_ROOT).run()
-
-
-
-def run_ssl(args):
-    if getattr(args, "scanner", False):
-        from scripts.ssl.scanner import run_ssl_scanner
-        run_ssl_scanner(args)
-        return
-    from modules.ssl_script_shell import SSLScriptShell
-    SSLScriptShell(_ROOT).run()
-
-def run_ssh(args):
-    if getattr(args, "scanner", False):
-        from scripts.ssh.scanner import run_ssh_scanner
-        run_ssh_scanner(args)
-        return
-    from modules.ssh_script_shell import SSHScriptShell
-    SSHScriptShell(_ROOT).run()
-
-def run_kerberos(args):
-    if getattr(args, "scanner", False):
-        from scripts.kerberos.scanner import run_kerberos_scanner
-        run_kerberos_scanner(args)
-        return
-    from modules.kerberos_script_shell import KerberosScriptShell
-    KerberosScriptShell(_ROOT).run()
-
-def run_rpc(args):
-    if getattr(args, "scanner", False):
-        from scripts.rpc.scanner import run_rpc_scanner
-        run_rpc_scanner(args)
-        return
-    from modules.rpc_script_shell import RPCScriptShell
-    RPCScriptShell(_ROOT).run()
-
-def run_ldap(args):
-    if getattr(args, "scanner", False):
-        from scripts.ldap.scanner import run_ldap_scanner
-        run_ldap_scanner(args)
-        return
-    from modules.ldap_script_shell import LDAPScriptShell
-    LDAPScriptShell(_ROOT).run()
-
-def run_winrm(args):
-    if getattr(args, "scanner", False):
-        from scripts.winrm.scanner import run_winrm_scanner
-        run_winrm_scanner(args)
-        return
-    from modules.winrm_script_shell import WinRMScriptShell
-    WinRMScriptShell(_ROOT).run()
-
-# ============================================================
-# Runner DB
-# ============================================================
-
-def run_db(args):
-    action = getattr(args, "db_action", None)
-    if action is None:
-        console.print("[yellow]Acciones disponibles: targets, findings, creds, delete[/yellow]")
-        console.print("[dim]lobera.py db <acción> -h[/dim]")
-        return
-    if getattr(args, "example", False):
-        _show_db_examples(action); return
-    if action == "targets":    _run_db_targets()
-    elif action == "findings": _run_db_findings(args)
-    elif action == "creds":    _run_db_creds(args)
-    elif action == "delete":   _run_db_delete(args)
-
-
-def _run_db_targets():
-    targets = get_targets()
-    if not targets:
-        console.print("[yellow]No hay objetivos guardados aún.[/yellow]"); return
-    print_table("Objetivos", ["IP","Dominio","Hostname","Primera vez"],
-                [(t["ip"], t["domain"] or "-", t["hostname"] or "-", t["first_seen"])
-                 for t in targets])
-
-
-def _run_db_findings(args):
-    if not args.target:
-        console.print("[red]Falta -t/--target.[/red]"); return
-    findings = get_findings(args.target)
-    if getattr(args,"protocol",None):
-        findings = [f for f in findings if f["protocol"] == args.protocol]
-    if not findings:
-        console.print(f"[yellow]No hay hallazgos para {args.target}.[/yellow]"); return
-    print_table(f"Hallazgos — {args.target}",
-                ["Protocolo","Tipo","Detalle","Timestamp"],
-                [(f["protocol"],f["finding_type"],f["detail"],f["timestamp"])
-                 for f in findings])
-
-
-def _run_db_creds(args):
-    if not args.target:
-        console.print("[red]Falta -t/--target.[/red]"); return
-    creds = get_credentials(args.target, only_valid=not getattr(args,"all",False))
-    if not creds:
-        console.print(f"[yellow]No hay credenciales para {args.target}.[/yellow]"); return
-    show_secret = getattr(args,"show_secret",False)
-    rows = []
-    for c in creds:
-        secret = c["secret"] if show_secret else ("*"*8 if c["secret"] else "")
-        rows.append((c["user"] or "(vacío)", secret,
-                     detect_hash_format(c["secret"],c["secret_type"]),
-                     "Sí" if c["valid"] else "No",
-                     c["source"], c["timestamp"]))
-    print_table(f"Credenciales — {args.target}",
-                ["Usuario","Secreto","Formato","Válida","Origen","Timestamp"], rows)
-    if not show_secret and creds:
-        console.print("[dim]Usa --show-secret para ver los secretos en claro.[/dim]")
-
-
-def _run_db_delete(args):
-    if not args.target:
-        console.print("[red]Falta -t/--target.[/red]"); return
-    findings = get_findings(args.target)
-    creds    = get_credentials(args.target, only_valid=False)
-    targets  = [t for t in get_targets() if t["ip"] == args.target]
-    if not targets and not findings and not creds:
-        console.print(f"[yellow]No hay nada guardado para {args.target}.[/yellow]"); return
-    console.print(f"[bold red]Borrar TODO para {args.target}:[/bold red]")
-    console.print(f"  • {len(targets)} target(s) · {len(creds)} credencial(es) · {len(findings)} finding(s)")
-    console.print("[bold red]Irreversible.[/bold red]\n")
-    if not getattr(args,"yes",False):
-        ans = console.input("¿Confirmar? Escribe [bold]sí[/bold]: ").strip().lower()
-        if ans not in ("si","sí","s","yes","y"):
-            console.print("[yellow]Cancelado.[/yellow]"); return
-    counts = delete_target(args.target)
-    console.print(f"[green]Borrado: {sum(counts.values())} fila(s).[/green]")
-
-
-def _show_db_examples(action):
-    examples = {
-        "targets":  [{"flag":"(sin flags)","desc":"Lista todos","good":"lobera.py db targets","bad":"db targets -t IP"}],
-        "findings": [{"flag":"-t","desc":"Objetivo","good":"db findings -t 10.129.1.5","bad":"db findings (sin -t)"}],
-        "creds":    [{"flag":"--show-secret","desc":"Ver secretos","good":"db creds -t IP --show-secret","bad":"en sesión grabada"}],
-        "delete":   [{"flag":"-t","desc":"Borra todo","good":"db delete -t IP","bad":"db delete -t IP --yes sin revisar"}],
-    }
-    for ex in examples.get(action,[]):
-        t = Table(title=f"Ejemplos — db {action}")
-        t.add_column("Parámetro",style="cyan"); t.add_column("Qué hace")
-        t.add_column("[green]Buen uso[/green]"); t.add_column("[red]Mal uso[/red]")
-        t.add_row(ex["flag"],ex["desc"],ex["good"],ex["bad"])
-        console.print(t)
-
-
-# ============================================================
-# Entry point
-# ============================================================
 def main():
     root_str = str(_ROOT)
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
-    
-    show_banner()
+
     init_db()
 
     from core.auth import login
@@ -719,6 +395,7 @@ def main():
     args   = parser.parse_args()
 
     if args.module is None:
+        show_banner()
         console.print("[yellow]No se ha especificado ningún módulo.[/yellow]")
         console.print(
             "Módulos disponibles: "
@@ -728,15 +405,17 @@ def main():
             "[bold yellow]ldap[/bold yellow] · "
             "[bold cyan]winrm[/bold cyan] · "
             "[bold turquoise2]ssh[/bold turquoise2] · "
-            "[bold gold1]ssl[/bold gold1] ·"
+            "[bold gold1]ssl[/bold gold1] · "
             "[bold bright_cyan]http[/bold bright_cyan] · "
             "[bold deep_sky_blue1]https[/bold deep_sky_blue1] · "
             "[bold orange1]ftp[/bold orange1] · "
             "[bold bright_red]mssql[/bold bright_red] · "
             "[bold white]db[/bold white]"
         )
-        console.print("[dim]lobera.py <módulo> -h     →  opciones del módulo[/dim]")
-        console.print("[dim]lobera.py <módulo>         →  árbol de scripts disponibles[/dim]\n")
+        console.print("[dim]lobera.py <módulo>                    → árbol de scripts disponibles[/dim]")
+        console.print("[dim]lobera.py <módulo> --script=<nombre>  → ver parámetros / ejecutar[/dim]")
+        console.print("[dim]lobera.py <módulo> --scanner          → autopwn scanner[/dim]")
+        console.print("[dim]lobera.py <módulo> --interactive-shell → consola interactiva[/dim]\n")
         return
 
     dispatch = {
@@ -758,6 +437,7 @@ def main():
         runner(args)
     else:
         console.print(f"[red]Módulo desconocido: {args.module}[/red]")
+
 
 if __name__ == "__main__":
     try:
