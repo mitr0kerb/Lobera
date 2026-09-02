@@ -1,0 +1,27 @@
+# Core protocol library
+impacket>=0.12.0
+
+# Terminal UI
+rich>=13.0.0
+pyfiglet>=1.0.2
+
+# Kerberos crypto (used in asn1_helpers.py)
+pycryptodomex>=3.19.0
+pyasn1>=0.6.0
+
+# WinRM module
+pywinrm>=0.4.3
+
+# YAML export (scanner output)
+pyyaml>=6.0.1
+
+# MSSQL (via impacket TDS, pero por si acaso)
+# impacket already handles TDS — no extra dep needed
+
+# FTP — stdlib ftplib, no extra dep
+
+# SSH — impacket handles it OR:
+# paramiko>=3.4.0  ← uncomment if using paramiko directly
+
+# Type hints backport (Python < 3.11)
+# typing_extensions>=4.9.0
