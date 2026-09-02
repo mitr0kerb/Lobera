@@ -1,270 +1,345 @@
-<div align="center">
+<p align="center">
+  <img src="docs/lobera_logo.png" alt="Lobera logo" width="220"/>
+</p>
 
-```
-    __    ____  ____  __________  ___ 
-   / /   / __ \/ __ )/ ____/ __ \/   |
-  / /   / / / / __  / __/ / /_/ / /| |
- / /___/ /_/ / /_/ / /___/ _, _/ ___ |
-/_____/\____/_____/_____/_/ |_/_/  |_|
-```
+<h1 align="center">Lobera</h1>
 
-**AD enumeration & attack toolkit**
+<p align="center">
+  <strong>Active Directory enumeration & attack toolkit</strong><br/>
+  Built from scratch on top of <code>impacket</code> — understand the protocols, not just the tools.
+</p>
 
-*SMB · RPC · Kerberos · LDAP · WinRM · SSH*
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square"/>
+  <img src="https://img.shields.io/badge/protocols-SMB%20·%20Kerberos%20·%20LDAP%20·%20RPC%20·%20WinRM%20·%20SSH%20·%20SSL%20·%20HTTP%20·%20FTP%20·%20MSSQL-red?style=flat-square"/>
+  <img src="https://img.shields.io/badge/status-active-green?style=flat-square"/>
+</p>
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active%20Development-orange?style=flat-square)
-![Author](https://img.shields.io/badge/Author-mitr0kerb-red?style=flat-square)
 
-> ⚠️ **Para uso exclusivo en entornos controlados y con autorización explícita.**  
-> El autor no se hace responsable del uso indebido de esta herramienta.
+---
+## IMPORTANT ⚠️
+This is a beta version, many of the scripts are not fully-tested on full-working systems, they may appear issues that will be fixed in next updates. If you find any issue please let me know mailing me:
+📧 mitr0kerb@gmail.com
+---
 
-</div>
+## What is Lobera?
+
+Lobera is a modular Active Directory pentest toolkit designed as a learning platform. Every protocol — SMB, Kerberos, LDAP, RPC, WinRM, SSH, SSL, HTTP/S, FTP, MSSQL — is implemented from scratch on top of `impacket` so you understand what packet goes to what port and why.
+
+It is **not** a wrapper around CrackMapExec. Every call maps to a real protocol operation.
 
 ---
 
-## ¿Qué es Lobera?
-
-Lobera es un toolkit modular de enumeración y ataque contra entornos **Active Directory**, construido desde cero sobre [impacket](https://github.com/fortra/impacket) y [paramiko](https://www.paramiko.org/).
-
-### Características principales
-
-- **Consola interactiva por módulo** — cada protocolo tiene su propia shell con comandos `load`, `set`, `run`, persistencia de parámetros entre scripts y ejemplos integrados.
-- **Scanner autopwn** — motor de ejecución automática que encadena scripts según los hallazgos anteriores. Con solo el target lanza todo lo que puede; con credenciales, más.
-- **Persistencia entre sesiones** — base de datos SQLite que almacena targets, credenciales válidas y hallazgos. Todo lo encontrado en una sesión está disponible en la siguiente.
-- **Implementación a bajo nivel** — los módulos implementan SMB, Kerberos, LDAP y RPC directamente sobre impacket, sin capas de abstracción que oculten lo que ocurre en el protocolo.
-- **CVEs recientes implementados** — regreSSHion (CVE-2024-6387), Terrapin (CVE-2023-48795), libssh bypass (CVE-2018-10933), PrintNightmare, PetitPotam, noPac y más.
-- **Exportación de resultados** — JSON, HTML, XML y YAML al terminar cada scan.
-- **Autenticación local** — acceso protegido con PBKDF2-HMAC-SHA256 y sesiones de 8 horas.
-
----
-
-## Instalación
+## Installation
 
 ```bash
-git clone https://github.com/mitr0kerb/Lobera.git
+git clone git@github.com:mitr0kerb/Lobera.git
 cd Lobera
 pip install -r requirements.txt
 python3 lobera.py
 ```
 
-**Requisitos:** Python 3.10+, Kali Linux / Parrot OS recomendado.
-
-En el primer arranque se generan credenciales de acceso temporales que deberás cambiar.
+**Requirements:** Python 3.10+, impacket, rich, pyfiglet, pycryptodomex, pyasn1, pywinrm.
 
 ---
 
-## Uso
+## Three modes
 
-### Abrir la consola de un módulo
+Lobera has three independent ways to operate. Use whichever fits your workflow.
+
+### 1. Classic mode — direct CLI
+
+The fastest way to run a single script or an entire family. No shell, no prompts — everything is a flag.
 
 ```bash
+# List all scripts for a protocol
 python3 lobera.py smb
-python3 lobera.py ssh
-python3 lobera.py kerberos
-python3 lobera.py rpc
-python3 lobera.py ldap
-python3 lobera.py winrm
+
+# Show required and optional parameters for a script
+python3 lobera.py smb --script=null-session
+
+# Run the script once all required params are provided
+python3 lobera.py smb --script=shares -t 10.10.10.5 -u iker -p Pass123!
+
+# Run an entire family at once
+python3 lobera.py ldap --script-fam=enum -t 10.10.10.5 -d CORP.LOCAL -u iker -p Pass123!
 ```
 
-### Lanzar el autopwn scanner
+When you run `--script=<name>` without all required parameters, Lobera prints a usage card:
+
+```
+SHARES  — SMB / enum
+
+REQUIRED PARAMETERS
+
+  *  --target <value>     (Target IP/hostname)
+  *  --user   <value>     (Username)
+
+OPTIONAL PARAMETERS
+
+  ·  --password <value>   (Password)
+  ·  --hash     <value>   (NT hash — pass-the-hash)
+  ·  --timeout  <value>   (default: 5)
+
+EXAMPLE
+
+  python3 lobera.py smb --script=shares --target <target> --user <user>
+
+Missing required parameters: --target, --user
+Add them to the command and run again.
+```
+
+Once all required parameters are present in the command, the script runs immediately — no further interaction needed.
+
+### 2. Interactive shell — per-protocol console
+
+A persistent REPL for each protocol. Set parameters once and run multiple scripts without retyping them.
 
 ```bash
-python3 lobera.py <módulo> --scanner
+python3 lobera.py smb --interactive-shell
+python3 lobera.py kerberos --interactive-shell
+python3 lobera.py mssql --interactive-shell
 ```
 
-### Comandos de la consola
+Inside the shell:
 
-| Comando | Descripción |
+```
+smb-shell > list
+smb-shell > load shares
+smb-shell(shares) > set target 10.10.10.5
+smb-shell(shares) > set user iker
+smb-shell(shares) > run
+smb-shell(shares) > load gpp-password
+smb-shell(shares) > run          ← target/user already set, reused
+```
+
+Shell commands:
+
+| Command | Description |
 |---|---|
-| `list` | Lista scripts disponibles agrupados por familia |
-| `load <script>` | Carga un script individual |
-| `load-fam <familia>` | Carga y ejecuta todos los scripts de una familia |
-| `params` | Muestra parámetros actuales, obligatorios y opcionales |
-| `set <k> <v>` | Asigna un parámetro |
-| `unset <k>` | Elimina un parámetro |
-| `run` | Ejecuta el script cargado |
-| `clear` | Limpia la pantalla |
-| `exit` | Sale de la consola |
+| `list` | Show all scripts grouped by family |
+| `load <script>` | Load a script and see its parameters |
+| `load-fam <family>` | Load and run all scripts in a family |
+| `set <key> <value>` | Set a parameter |
+| `unset <key>` | Clear a parameter |
+| `params` | Show current parameter values |
+| `run` | Execute the loaded script |
+| `clear` | Clear screen |
+| `exit` | Exit the shell |
 
-### Ejemplo de sesión
+### 3. Autopwn scanner — automated multi-phase scan
 
-```
-❯ python3 lobera.py ssh
-
-ssh-shell > load regresshion
-# Muestra parámetros obligatorios, opcionales y ejemplo de uso
-
-ssh-shell(regresshion) > set target 10.10.10.5
-  ✓ target = 10.10.10.5
-
-ssh-shell(regresshion) > run
-[SSH] 10.10.10.5 - VULNERABLE a CVE-2024-6387 — OpenSSH 8.9p1
-
-# Cambiar de script sin perder el target
-ssh-shell(regresshion) > load terrapin-check
-ssh-shell(terrapin-check) > run
-```
-
----
-
-## Módulos y scripts
-
-### SMB
-`signing-check` · `null-session` · `shares` · `gpp-password` · `spider` · `password-spray` · `interactive-shell`
-
-### RPC
-`domain-info` · `users` · `groups` · `sessions` · `privileges` · `services` · `registry` · `exec-service` · `rid-brute` · `printnightmare` · `petitpotam` · `sam-dump`
-
-### Kerberos
-`user-enum` · `spn-scan` · `asrep-roasting` · `kerberoasting` · `pass-the-ticket` · `overpass-the-hash` · `golden-ticket` · `silver-ticket` · `diamond-ticket` · `sapphire-ticket` · `unconstrained-deleg` · `constrained-s4u` · `rbcd` · `shadow-credentials` · `pkinit` · `adcs` · `sam-spoofing` · `ms14-068` · `kerber-loss` · `reset-nightmare`
-
-### LDAP
-`domain-info` · `users` · `groups` · `computers` · `admins` · `password-policy` · `asreproast-targets` · `kerberoast-targets` · `dacl-enum` · `bloodhound-export` · `acl-abuse` · `password-spray-ldap` · `ntlm-relay-setup`
-
-### WinRM
-`check` · `sysinfo` · `password-spray` · `privesc-check` · `evil-winrm-payload`
-
-### SSH
-`banner-grab` · `auth-methods` · `key-exchange-enum` · `host-key-fingerprint` · `terrapin-check` · `user-enum` · `password-spray` · `brute-force` · `key-auth-test` · `known-keys` · `libssh-bypass` · `regresshion` · `terrapin-exploit` · `config-dump` · `key-harvest` · `persistence` · `lateral-move`
-
----
-
-## Base de datos de sesión
+The scanner runs all relevant scripts for a protocol in order, phase by phase. It asks for parameters interactively, evaluates conditions (has credentials? has a userlist? has a ccache?), and skips steps whose conditions are not met.
 
 ```bash
-python3 lobera.py db
+python3 lobera.py smb --scanner
+python3 lobera.py kerberos --scanner
+python3 lobera.py ldap --scanner
+```
 
-db > targets              # Objetivos descubiertos
-db > credentials          # Credenciales válidas encontradas
-db > findings             # Todos los hallazgos
-db > findings 10.10.10.5  # Hallazgos de un objetivo específico
-db > clear                # Limpia la base de datos
+The scanner collects: target, credentials, optional wordlists — then runs through phases automatically and prints a summary at the end. Results are saved to the session database.
+
+---
+
+## Supported protocols
+
+| Protocol | Port | Color | Families |
+|---|---|---|---|
+| SMB | 445 | green | enum · attack |
+| Kerberos | 88 | magenta | enum · extraction · tickets · delegation · credentials · exploits |
+| LDAP | 389/636 | yellow | enum · attack · exploit |
+| RPC | 135 | blue | enum · attack · exploit |
+| WinRM | 5985/5986 | cyan | enum · attack · exploit |
+| SSH | 22 | turquoise | enum · attack · exploit |
+| SSL | 443+ | gold | enum · attack |
+| HTTP | 80 | bright cyan | enum · attack · exploit · post |
+| HTTPS | 443 | deep sky blue | enum · attack · exploit · post |
+| FTP | 21 | orange | enum · attack · exploit · post |
+| MSSQL | 1433 | bright red | enum · attack · exploit · post |
+
+---
+
+## Session database
+
+Every finding, credential, and target is saved automatically to a local SQLite database (`lobera.db`). Results persist across sessions.
+
+```bash
+# List all seen targets
+python3 lobera.py db targets
+
+# Show all findings for a target
+python3 lobera.py db findings -t 10.10.10.5
+
+# Show valid credentials
+python3 lobera.py db creds -t 10.10.10.5
+
+# Show credentials with secrets visible
+python3 lobera.py db creds -t 10.10.10.5 --show-secret
+
+# Delete all data for a target
+python3 lobera.py db delete -t 10.10.10.5
 ```
 
 ---
 
-## Implementar nuevos scripts
+## Writing a custom script
 
-Lobera está diseñado para ser extensible. Cualquier script nuevo es una clase Python que hereda de `BaseScript`.
+Every script is a Python file with a single class that inherits from `BaseScript`. Drop it in the right folder and Lobera discovers it automatically on next run — no registration needed.
 
-### Estructura de un script
-
-```python
-# scripts/<protocolo>/<familia>/<nombre_del_script>.py
-
-from scripts.base import BaseScript
-from modules.<protocolo> import <Módulo>
-from core.output import print_result, print_table
-from core import session_db
-
-class Script(BaseScript):
-    name        = "nombre-del-script"   # identificador usado en load/run
-    protocol    = "protocolo"           # smb, rpc, ssh, ldap...
-    category    = "familia"             # enum, attack, exploit, post
-    description = "Descripción clara de lo que hace el script."
-
-    EXAMPLES = [
-        {
-            "flag": "--parametro",
-            "desc": "Descripción del parámetro",
-            "good": "protocolo --script=nombre -t 10.10.10.5 --parametro valor",
-            "bad":  "protocolo --script=nombre -t 10.10.10.5  (sin --parametro)",
-        },
-    ]
-
-    def run(self, **kwargs):
-        # 1. Obtener parámetros del kwargs
-        param = kwargs.get("param", "valor_por_defecto")
-
-        # 2. Conectar al objetivo
-        module = <Módulo>(self.target, self.creds)
-        if not module.connect():
-            return None
-
-        # 3. Ejecutar la lógica
-        resultado = module.hacer_algo(param)
-
-        # 4. Guardar hallazgos importantes en la base de datos
-        session_db.save_finding(self.target.ip, "PROTOCOLO", "tipo_hallazgo", str(resultado))
-
-        # 5. Mostrar resultados con el sistema de output de Lobera
-        print_result("PROTOCOLO", self.target.ip, "ok", f"resultado: {resultado}")
-
-        # 6. Devolver el resultado (el scanner lo usa para tomar decisiones)
-        return resultado
-```
-
-### Dónde va cada fichero
+### File location
 
 ```
 scripts/
-└── <protocolo>/
-    └── <familia>/
-        └── <nombre_del_script>.py
+  <protocol>/
+    <family>/
+      your_script.py
 ```
 
-Por ejemplo, un script de enumeración SSH iría en:
-```
-scripts/ssh/enum/mi_script.py
-```
+Example: `scripts/smb/enum/my_check.py`
 
-Las familias disponibles son `enum`, `attack`, `exploit` y `post`. Puedes crear nuevas si tiene sentido para tu protocolo.
-
-### Registrarlo en la consola interactiva
-
-Añade la entrada en `scripts/<protocolo>/shell_params.py`:
+### Script structure
 
 ```python
-"nombre-del-script": {
-    "description": "Descripción del script.",
-    "required": ["target"],                        # parámetros obligatorios
-    "optional": ["password", "timeout"],           # parámetros opcionales
-    "defaults": {"timeout": 5},                    # valores por defecto
-    "mutually_exclusive": [["password", "hash"]],  # si aplica
-    "at_least_one": [["password", "hash"]],        # si aplica
-    "example": [
-        "set target 10.10.10.5",
-        "set password Pass123!",
-        "run",
-    ],
-},
+# scripts/smb/enum/my_check.py
+
+from scripts.base import BaseScript
+from modules.smb import SMBModule
+from core.output import print_result, print_table
+from core import session_db
+
+
+class Script(BaseScript):
+    name        = "my-check"          # used in --script=my-check and the tree
+    protocol    = "smb"
+    category    = "enum"
+    description = "One-line description shown in the script tree."
+
+    def run(self, **kwargs):
+        # kwargs contains all extra parameters (port, userlist, etc.)
+        # self.target  → Target(ip, domain, timeout)
+        # self.creds   → Creds(user, password, domain, hash)
+
+        port = int(kwargs.get("port") or 445)
+
+        mod = SMBModule(self.target, self.creds)
+        if not mod.connect(port=port):
+            return None
+
+        try:
+            # ... your logic here ...
+            result = mod.some_operation()
+
+            print_result("SMB", self.target.ip, "ok", "Operation succeeded")
+            session_db.save_finding(self.target.ip, "SMB", "my_check", str(result))
+
+            return result
+        finally:
+            mod.disconnect()
 ```
 
-### Registrarlo en el scanner autopwn
+### Class contract
 
-Añade la entrada en `scripts/<protocolo>/scan_params.py`:
+| Attribute / method | Required | Description |
+|---|---|---|
+| `name` | yes | Script identifier (kebab-case). Must be unique per protocol. |
+| `protocol` | yes | Protocol name in lowercase (`smb`, `ldap`, etc.) |
+| `category` | yes | Family name (`enum`, `attack`, `exploit`, `post`) |
+| `description` | yes | One-line description shown in the tree and parameter card |
+| `run(self, **kwargs)` | yes | Main entry point. Return `None` on failure, any value on success. |
+
+### BaseScript internals
 
 ```python
-{"script": "nombre-del-script", "condition": "has_auth"},
+class BaseScript:
+    def __init__(self, target: Target, creds: Creds):
+        self.target = target
+        self.creds  = creds
+
+    def run(self, **kwargs):
+        raise NotImplementedError
 ```
 
-**Condiciones disponibles:**
+### Adding parameters to the shell and classic mode
 
-| Condición | Se ejecuta cuando |
+Create or update `scripts/<protocol>/shell_params.py`:
+
+```python
+SCRIPT_PARAMS = {
+    "my-check": {
+        "description": "One-line description.",
+        "required": ["target"],
+        "optional": ["user", "password", "port", "timeout"],
+        "defaults": {"port": 445, "timeout": 5},
+        "example": [
+            "set target 10.10.10.5",
+            "run",
+        ],
+    },
+}
+
+PARAM_LABELS = {
+    "target":  "Target IP/hostname",
+    "port":    "SMB port (default: 445)",
+    "timeout": "Connection timeout (seconds)",
+}
+```
+
+Without a `shell_params.py` entry the script still runs — Lobera just shows minimal parameter info.
+
+### Adding the script to the autopwn scanner
+
+Edit `scripts/<protocol>/scan_params.py` and add an entry to `SCAN_ORDER`:
+
+```python
+SCAN_ORDER = [
+    ...
+    {"script": "my-check", "condition": None},           # always runs
+    {"script": "my-check", "condition": "has_auth"},     # only if credentials present
+    ...
+]
+```
+
+Available conditions (defined in `ScanContext`):
+
+| Condition | True when |
 |---|---|
-| `None` | Siempre |
-| `"has_auth"` | Hay usuario + contraseña o hash |
-| `"has_userlist"` | Se proporcionó userlist válida |
-| `"has_listener"` | Se proporcionó IP de listener |
-| `"has_command"` | Se proporcionó comando a ejecutar |
+| `None` | Always |
+| `has_auth` | `user` and (`password` or `hash`) are set |
+| `has_userlist` | A valid userlist file path is provided |
+| `has_shares` | The shares script found at least one non-special share |
+| `has_ccache` | A `.ccache` file is available (given or generated by overpass-the-hash) |
+| `has_krbtgt_sid` | Both `krbtgt_hash` and `domain_sid` are provided |
 
-Con esos tres pasos el script aparece automáticamente en `list`, en `load`, en `load-fam` y en el scanner.
-
----
-
-## Colaboración
-
-Si quieres contribuir con nuevos scripts, módulos o mejoras, puedes contactar en:
-
-📧 **mitr0kerb@gmail.com**
+Custom conditions can be added to the protocol's `ScanContext` subclass.
 
 ---
 
-<div align="center">
+## Authentication
 
-*by [mitr0kerb](https://github.com/mitr0kerb)*
+On first run, Lobera creates an encrypted local session. You set a master password — credentials are stored with PBKDF2-HMAC-SHA256. Sessions expire after 8 hours.
 
-</div>
+---
+
+## Target platforms
+
+- Linux (Kali, Parrot) — primary
+- macOS (Apple Silicon, via ARM64 VM) — tested
+- Windows — not tested
+
+---
+
+## Disclaimer
+
+Lobera is a personal educational project. Use it only on systems you own or have explicit written permission to test. Unauthorized use against third-party systems is illegal.
+
+---
+
+## Author
+
+**mitr0kerb** — built as a hands-on deep-dive into Active Directory protocols.
+
+## Collaborations
+
+If you would like to contribute new scripts, modules, or improvements, you can contact:
+
+📧 mitr0kerb@gmail.com
