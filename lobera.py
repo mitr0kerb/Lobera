@@ -405,7 +405,11 @@ def build_parser():
         "--scanner", action="store_true",
         help="Modo autopwn interactivo SMB",
     )
-    
+   
+        # ---- FTP ----
+    ftp_p = subs.add_parser("ftp", help="Consola interactiva de scripts FTP")
+    ftp_p.add_argument("--scanner", action="store_true",
+                       help="Modo autopwn interactivo FTP")
         # ---- SSL ----
     ssl_p = subs.add_parser("ssl", help="Consola interactiva de scripts SSL/TLS")
     ssl_p.add_argument("--scanner", action="store_true",
@@ -430,6 +434,37 @@ def build_parser():
     ldap = subs.add_parser("ldap", help="Consola interactiva de scripts LDAP")
     ldap.add_argument("--scanner", action="store_true",
                       help="Modo autopwn interactivo LDAP")
+
+        # ── http ──────────────────────────────────────────────────────────────────
+    http_p = subs.add_parser(
+        "http",
+        help="Consola interactiva HTTP (enum, attack, exploit, post)"
+    )
+    http_p.add_argument("--scanner",  action="store_true",
+                        help="Lanza el autopwn scanner en lugar de la consola")
+    http_p.add_argument("-t","--target",  default=None)
+    http_p.add_argument("--port",         type=int, default=80)
+    http_p.add_argument("--path",         default="/")
+    http_p.add_argument("--param",        default=None)
+    http_p.add_argument("--wordlist",     default=None)
+    http_p.add_argument("--listener",     default=None)
+
+    # ── https ─────────────────────────────────────────────────────────────────
+    https_p = subs.add_parser(
+        "https",
+        help="Consola interactiva HTTPS (enum, attack, exploit, post)"
+    )
+    https_p.add_argument("--scanner",  action="store_true",
+                         help="Lanza el autopwn scanner en lugar de la consola")
+    https_p.add_argument("-t","--target",  default=None)
+    https_p.add_argument("--port",         type=int, default=443)
+    https_p.add_argument("--sni",          default=None)
+    https_p.add_argument("--path",         default="/")
+    https_p.add_argument("--param",        default=None)
+    https_p.add_argument("--wordlist",     default=None)
+    https_p.add_argument("--listener",     default=None)
+    https_p.add_argument("--client-id",    default=None, dest="client_id")
+    https_p.add_argument("--http-port",    type=int, default=80, dest="http_port")
     
         # ---- WinRM ----
     winrm = subs.add_parser("winrm", help="Consola interactiva de scripts WinRM")
@@ -474,6 +509,39 @@ def run_smb(args):
         return
     from modules.smb_script_shell import SMBScriptShell
     SMBScriptShell(_ROOT).run()
+
+def run_http(args):
+    from pathlib import Path
+    _ROOT = Path(__file__).parent
+    if getattr(args, "scanner", False):
+        from scripts.http.scanner import run_http_scanner
+        run_http_scanner(args)
+        return
+    from modules.http_script_shell import HTTPScriptShell
+    HTTPScriptShell(_ROOT).run()
+
+
+def run_https(args):
+    from pathlib import Path
+    _ROOT = Path(__file__).parent
+    if getattr(args, "scanner", False):
+        from scripts.https.scanner import run_https_scanner
+        run_https_scanner(args)
+        return
+    from modules.https_script_shell import HTTPSScriptShell
+    HTTPSScriptShell(_ROOT).run()
+
+def run_ftp(args):
+    from pathlib import Path
+    _ROOT = Path(__file__).parent
+    if getattr(args, "scanner", False):
+        from scripts.ftp.scanner import run_ftp_scanner
+        run_ftp_scanner(args)
+        return
+    from modules.ftp_script_shell import FTPScriptShell
+    FTPScriptShell(_ROOT).run()
+
+
 
 def run_ssl(args):
     if getattr(args, "scanner", False):
@@ -647,6 +715,9 @@ def main():
             "[bold cyan]winrm[/bold cyan] · "
             "[bold turquoise2]ssh[/bold turquoise2] · "
             "[bold gold1]ssl[/bold gold1] ·"
+            "[bold bright_cyan]http[/bold bright_cyan] · "
+            "[bold deep_sky_blue1]https[/bold deep_sky_blue1] · "
+            "[bold orange1]ftp[/bold orange1] · "
             "[bold white]db[/bold white]"
         )
         console.print("[dim]lobera.py <módulo> -h     →  opciones del módulo[/dim]")
@@ -661,6 +732,9 @@ def main():
         "winrm":    run_winrm,
         "ssh":      run_ssh,
         "ssl":      run_ssl,
+        "http":     run_http,
+        "https":    run_https,
+        "ftp":      run_ftp,
         "db":       run_db,
     }
     runner = dispatch.get(args.module)
