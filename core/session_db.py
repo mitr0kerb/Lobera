@@ -310,7 +310,48 @@ def get_credentials(target_ip, only_valid=True):
     conn.close()
     return [dict(r) for r in rows]
 
-
+class _DBProxy:
+    """
+    Proxy object that exposes session_db functions as methods
+    with Go-style naming (DB.SaveFinding, DB.SaveTarget, etc.).
+    Allows new scripts to use session_db.DB.SaveFinding() while
+    legacy scripts keep using session_db.save_finding() directly.
+    Both styles work simultaneously — nothing breaks.
+    """
+ 
+    def SaveTarget(self, ip, hostname=None, domain=None):
+        save_target(ip, hostname=hostname, domain=domain)
+ 
+    def SaveCredential(self, target_ip, user, secret, secret_type, valid, source):
+        save_credential(target_ip, user, secret, secret_type, valid, source)
+ 
+    def SaveFinding(self, target_ip, protocol, finding_type, detail):
+        save_finding(target_ip, protocol, finding_type, detail)
+ 
+    def SaveAttack(self, target_ip, action, result):
+        save_attack(target_ip, action, result)
+ 
+    def GetTargets(self):
+        return get_targets()
+ 
+    def GetFindings(self, target_ip, protocol=None):
+        findings = get_findings(target_ip)
+        if protocol:
+            findings = [f for f in findings if f["protocol"] == protocol]
+        return findings
+ 
+    def GetCredentials(self, target_ip, only_valid=True):
+        return get_credentials(target_ip, only_valid=only_valid)
+ 
+    def DeleteTarget(self, target_ip):
+        return delete_target(target_ip)
+ 
+    def Path(self):
+        return DB_PATH
+ 
+ 
+# Singleton — used by new scripts as: session_db.DB.SaveFinding(...)
+DB = _DBProxy()
 # ============================================================
 # Autenticación de acceso a Lobera (tabla auth)
 # ============================================================
