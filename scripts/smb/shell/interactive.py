@@ -200,7 +200,12 @@ class Script(BaseScript):
                         continue
                     is_dir = bool(e.get_attributes() & 0x10)
                     size   = "-" if is_dir else f"{e.get_filesize():,}"
-                    mtime  = e.get_mtime().strftime("%Y-%m-%d %H:%M") if e.get_mtime() else "-"
+                    try:
+                        mt = e.get_mtime_epoch()
+                        from datetime import datetime
+                        mtime = datetime.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M") if mt else "-"
+                    except Exception:
+                        mtime = "-"
                     name_s = f"[bold blue]{n}/[/bold blue]" if is_dir else n
                     t.add_row(name_s, size, mtime)
                 console.print(t)
@@ -287,6 +292,8 @@ class Script(BaseScript):
             cmd   = parts[0].lower()
             arg   = parts[1] if len(parts) > 1 else ""
 
+            if cmd == "dir":
+                cmd = "ls"
             if cmd in ("exit", "quit"):
                 console.print("[dim]Exiting SMB shell.[/dim]")
                 break
