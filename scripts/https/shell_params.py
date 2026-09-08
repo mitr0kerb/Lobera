@@ -1,0 +1,183 @@
+# scripts/https/shell_params.py
+
+EXPORT_FORMATS = ["json", "html", "xml", "yaml"]
+
+SCRIPT_PARAMS = {
+    # ── enum ──────────────────────────────────────────────────────────────────
+    "banner-grab": {
+        "description": "Obtiene headers del servidor HTTPS y detecta tecnologías, versiones y WAF.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set port 443", "run"],
+    },
+    "tech-detect": {
+        "description": "Detecta CMS, frameworks, lenguajes, servidores y CDNs sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "dir-bruteforce": {
+        "description": "Fuerza bruta de rutas sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "wordlist", "delay"],
+        "defaults": {"port": 443, "timeout": 5, "delay": 0},
+        "example": ["set target 10.10.10.5", "set wordlist /opt/wordlists/common.txt", "run"],
+    },
+    "cors-check": {
+        "description": "Detecta CORS misconfiguration sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "security-headers": {
+        "description": "Script propio: analiza CSP, HSTS, X-Frame, Permissions-Policy y más. Puntúa la postura de seguridad.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "robots-sitemap": {
+        "description": "robots.txt y sitemap.xml sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "js-secrets": {
+        "description": "Script propio: busca secretos hardcoded en JS servidos por HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "certificate-pinning": {
+        "description": "Script propio: detecta HPKP, Expect-CT y comprueba si el pinning es bypasseable.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    # ── attack ────────────────────────────────────────────────────────────────
+    "sqli-detect": {
+        "description": "SQL injection sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "param"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/", "param": "id"},
+        "example": ["set target 10.10.10.5", "set param id", "run"],
+    },
+    "xss-detect": {
+        "description": "XSS reflejado sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "param"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/", "param": "q"},
+        "example": ["set target 10.10.10.5", "set param q", "run"],
+    },
+    "lfi-detect": {
+        "description": "LFI sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "param"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/", "param": "file"},
+        "example": ["set target 10.10.10.5", "set param page", "run"],
+    },
+    "ssrf-detect": {
+        "description": "SSRF sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "param"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/", "param": "url"},
+        "example": ["set target 10.10.10.5", "set param url", "run"],
+    },
+    "jwt-attack": {
+        "description": "Script propio: alg=none, weak secret, kid injection sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "jwt"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set jwt eyJ...", "run"],
+    },
+    "oauth-misconfig": {
+        "description": "Script propio: detecta redirect_uri bypass, implicit flow inseguro y state param ausente.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "client_id"],
+        "defaults": {"port": 443, "timeout": 5},
+        "example": ["set target 10.10.10.5", "set client_id myapp", "run"],
+    },
+    "cache-poisoning": {
+        "description": "Script propio: web cache poisoning via X-Forwarded-Host y headers no cacheados.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    # ── exploit ───────────────────────────────────────────────────────────────
+    "log4shell": {
+        "description": "CVE-2021-44228: Log4j JNDI injection via HTTPS.",
+        "required": ["target", "listener"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "set listener abc.interactsh.com", "run"],
+    },
+    "spring4shell": {
+        "description": "CVE-2022-22965: Spring MVC ClassLoader manipulation → RCE.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "php-cgi-rce": {
+        "description": "CVE-2024-4577: PHP CGI arg injection via HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "command"],
+        "defaults": {"port": 443, "timeout": 5, "command": "whoami"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "jenkins-file-read": {
+        "description": "CVE-2024-23897: Jenkins CLI arbitrary file read → RCE.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "file_path"],
+        "defaults": {"port": 443, "timeout": 5, "file_path": "/etc/passwd"},
+        "example": ["set target 10.10.10.5", "set port 8080", "run"],
+    },
+    "tls-stripping": {
+        "description": "Script propio: detecta si la app es vulnerable a SSL stripping.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "http_port"],
+        "defaults": {"port": 443, "timeout": 5, "http_port": 80},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    # ── post ──────────────────────────────────────────────────────────────────
+    "extract-links": {
+        "description": "Extrae links, formularios y endpoints sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/"},
+        "example": ["set target 10.10.10.5", "run"],
+    },
+    "crawl": {
+        "description": "Script propio: spider recursivo sobre HTTPS.",
+        "required": ["target"],
+        "optional": ["port", "timeout", "sni", "path", "max_depth", "max_pages"],
+        "defaults": {"port": 443, "timeout": 5, "path": "/", "max_depth": 3, "max_pages": 30},
+        "example": ["set target 10.10.10.5", "set max_depth 3", "run"],
+    },
+}
+
+PARAM_LABELS = {
+    "target":     "IP/hostname del objetivo",
+    "port":       "Puerto HTTPS (default: 443)",
+    "timeout":    "Timeout de conexión (segundos)",
+    "sni":        "Server Name Indication",
+    "path":       "Ruta HTTP (default: /)",
+    "param":      "Parámetro a inyectar",
+    "wordlist":   "Ruta al fichero de rutas",
+    "delay":      "Delay entre peticiones (segundos)",
+    "listener":   "Dominio del listener OOB",
+    "command":    "Comando a ejecutar (RCE)",
+    "jwt":        "Token JWT a atacar",
+    "client_id":  "Client ID OAuth",
+    "http_port":  "Puerto HTTP para TLS stripping check",
+    "file_path":  "Ruta del fichero a leer (Jenkins)",
+    "max_depth":  "Profundidad máxima del crawler",
+    "max_pages":  "Páginas máximas del crawler",
+}
