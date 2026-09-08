@@ -35,7 +35,7 @@ It is **not** a wrapper around CrackMapExec. Every call maps to a real protocol 
 ```bash
 git clone git@github.com:mitr0kerb/Lobera.git
 cd Lobera
-pip install -r requirements.txt
+pip install -r requirements.txt --break-system-packages
 python3 lobera.py
 ```
 

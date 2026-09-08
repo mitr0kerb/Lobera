@@ -14,10 +14,11 @@ from core.session_db import init_db
 
 def show_banner():
     import pyfiglet
+    from core.i18n import T
     art = pyfiglet.figlet_format("LOBERA", font="slant")
     console.print(f"[bold cyan]{art}[/bold cyan]")
-    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL[/dim]")
-    console.print("[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
+    console.print(f"[dim]  {T('banner_subtitle')} — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL[/dim]")
+    console.print(f"[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
 # ── Tablas de shells / scanners ───────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ _SCANNER_FUNCS = {
 # ── Dispatcher genérico ───────────────────────────────────────────────────────
 
 def _run_proto(protocol, args):
+    from core.i18n import T
     root  = _ROOT
     color = _PROTO_COLORS.get(protocol, "white")
 
@@ -91,7 +93,6 @@ def _run_proto(protocol, args):
     from modules.classic import list_scripts, run_script, run_script_family
 
     if script:
-        # Modo clásico: muestra params si faltan, ejecuta si están todos
         run_script(protocol, script, root, color, args)
         return
 
@@ -99,7 +100,6 @@ def _run_proto(protocol, args):
         run_script_family(protocol, script_fam, root, color, args)
         return
 
-    # Sin flags: listar scripts
     list_scripts(protocol, root, color)
 
 
@@ -120,6 +120,7 @@ def run_mssql(args):    _run_proto("mssql",    args)
 # ── db ────────────────────────────────────────────────────────────────────────
 
 def run_db(args):
+    from core.i18n import T
     from core.session_db import (get_targets, get_findings,
                                   get_credentials, delete_target)
     from core.output import print_table
@@ -129,74 +130,76 @@ def run_db(args):
     if action == "targets":
         targets = get_targets()
         if not targets:
-            console.print("[yellow]No hay ningún objetivo guardado.[/yellow]")
+            console.print(f"[yellow]{T('db_no_targets')}[/yellow]")
             return
         rows = [(t["ip"], t["domain"] or "-", t["hostname"] or "-", t["first_seen"])
                 for t in targets]
-        print_table("Objetivos vistos", ["IP", "Dominio", "Hostname", "Primera vez"], rows)
+        print_table(T("db_targets_header"),
+                    [T("col_ip"), T("col_domain"), T("col_hostname"), T("col_first_seen")],
+                    rows)
 
     elif action == "findings":
         if not args.target:
-            console.print("[red]Falta -t/--target.[/red]"); return
+            console.print(f"[red]{T('err_no_target')}[/red]"); return
         findings = get_findings(args.target)
         if getattr(args, "protocol", None):
             findings = [f for f in findings if f["protocol"] == args.protocol]
         if not findings:
-            console.print(f"[yellow]Sin hallazgos para {args.target}.[/yellow]"); return
+            console.print(f"[yellow]{T('db_no_findings')} {args.target}.[/yellow]"); return
         rows = [(f["protocol"], f["finding_type"], f["detail"], f["timestamp"])
                 for f in findings]
-        print_table(f"Hallazgos para {args.target}",
-                    ["Protocolo", "Tipo", "Detalle", "Timestamp"], rows)
+        print_table(f"{T('db_findings_header')} {args.target}",
+                    [T("col_protocol"), T("col_type"), T("col_detail"), T("col_timestamp")],
+                    rows)
 
     elif action == "creds":
         if not args.target:
-            console.print("[red]Falta -t/--target.[/red]"); return
+            console.print(f"[red]{T('err_no_target')}[/red]"); return
         creds = get_credentials(args.target, only_valid=not getattr(args, "all", False))
         if not creds:
-            console.print(f"[yellow]Sin credenciales para {args.target}.[/yellow]"); return
+            console.print(f"[yellow]{T('db_no_creds')} {args.target}.[/yellow]"); return
         show_secret = getattr(args, "show_secret", False)
         rows = []
         for c in creds:
             secret = c["secret"] if show_secret else ("*" * 8 if c["secret"] else "")
+            valid  = T("col_yes") if c["valid"] else T("col_no")
             rows.append((c["user"] or "(vacío)", secret, c["secret_type"],
-                         "Sí" if c["valid"] else "No", c["source"], c["timestamp"]))
-        print_table(f"Credenciales para {args.target}",
-                    ["Usuario", "Secreto", "Tipo", "Válida", "Origen", "Timestamp"], rows)
+                         valid, c["source"], c["timestamp"]))
+        print_table(f"{T('db_creds_header')} {args.target}",
+                    [T("col_user"), T("col_secret"), "Tipo", T("col_valid"),
+                     T("col_origin"), T("col_timestamp")],
+                    rows)
         if not show_secret:
-            console.print("[dim]Secretos ocultos. Usa --show-secret para verlos.[/dim]")
+            console.print(f"[dim]{T('db_secrets_hidden')}[/dim]")
 
     elif action == "delete":
         if not args.target:
-            console.print("[red]Falta -t/--target.[/red]"); return
+            console.print(f"[red]{T('err_no_target')}[/red]"); return
         findings = get_findings(args.target)
         creds    = get_credentials(args.target, only_valid=False)
         targets  = [t for t in get_targets() if t["ip"] == args.target]
         if not targets and not findings and not creds:
-            console.print(f"[yellow]Nada guardado para {args.target}.[/yellow]"); return
-        console.print(f"[bold red]Vas a borrar TODO para {args.target}:[/bold red]")
+            console.print(f"[yellow]{T('db_nothing_saved')} {args.target}.[/yellow]"); return
+        console.print(f"[bold red]{T('db_delete_title')} {args.target}:[/bold red]")
         console.print(f"  • {len(targets)} target(s)")
         console.print(f"  • {len(creds)} credencial(es)")
         console.print(f"  • {len(findings)} finding(s)")
-        console.print("[bold red]Irreversible.[/bold red]\n")
+        console.print(f"[bold red]{T('db_delete_irreversible')}[/bold red]\n")
         if not getattr(args, "yes", False):
-            answer = console.input("¿Estás seguro? Escribe [bold]sí[/bold]: ").strip().lower()
+            answer = console.input(T("db_delete_confirm")).strip().lower()
             if answer not in ("si", "sí", "s", "yes", "y"):
-                console.print("[yellow]Cancelado.[/yellow]"); return
+                console.print(f"[yellow]{T('db_cancelled')}[/yellow]"); return
         counts = delete_target(args.target)
-        console.print(f"[green]Borrado: {sum(counts.values())} fila(s) eliminadas.[/green]")
+        total  = sum(counts.values())
+        console.print(f"[green]{T('db_deleted')} {total} {T('db_rows_deleted')}[/green]")
 
     else:
-        console.print("[yellow]Acciones disponibles: targets, findings, creds, delete[/yellow]")
+        console.print(f"[yellow]{T('db_actions')}: targets, findings, creds, delete[/yellow]")
         console.print("[dim]lobera.py db <acción> -h[/dim]")
 
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 def _add_proto_flags(p):
-    """
-    Flags de modo (cómo lanzar el módulo) + todos los parámetros posibles
-    de todos los scripts, para que el modo clásico los pueda recibir por CLI.
-    """
-    # ── modos ────────────────────────────────────────────────────────────────
     p.add_argument("--scanner",           action="store_true",
                    help="Autopwn scanner interactivo")
     p.add_argument("--interactive-shell", action="store_true",
@@ -208,127 +211,88 @@ def _add_proto_flags(p):
                    dest="script_fam",
                    help="Ejecuta toda una familia de scripts")
 
-    # ── credenciales / target base (comunes a casi todos los scripts) ─────────
-    p.add_argument("-t", "--target",   default=None,   help="IP/hostname del objetivo")
-    p.add_argument("-u", "--user",     default=None,   help="Usuario")
-    p.add_argument("-p", "--password", default=None,   help="Contraseña")
-    p.add_argument("-H", "--hash",     default=None,   help="Hash NT (pass-the-hash)")
-    p.add_argument("-d", "--domain",   default=None,   help="Dominio FQDN")
-    p.add_argument("--timeout",        default=None, type=int, help="Timeout (segundos)")
+    # target / credenciales
+    p.add_argument("-t", "--target",   default=None)
+    p.add_argument("-u", "--user",     default=None)
+    p.add_argument("-p", "--password", default=None)
+    p.add_argument("-H", "--hash",     default=None)
+    p.add_argument("-d", "--domain",   default=None)
+    p.add_argument("--timeout",        default=None, type=int)
 
-    # ── red / servicio ────────────────────────────────────────────────────────
-    p.add_argument("--port",           default=None, type=int, help="Puerto del servicio")
-    p.add_argument("--instance",       default=None,   help="Nombre de instancia (MSSQL)")
-    p.add_argument("--ldaps",          action="store_true", default=False, help="Usar LDAPS")
-    p.add_argument("--ssl",            action="store_true", default=False, help="Usar SSL")
-    p.add_argument("--sni",            default=None,   help="Server Name Indication (HTTPS)")
-    p.add_argument("--http-port",      default=None, type=int, dest="http_port",
-                   help="Puerto HTTP (para TLS stripping)")
+    # red / servicio
+    p.add_argument("--port",           default=None, type=int)
+    p.add_argument("--instance",       default=None)
+    p.add_argument("--ldaps",          action="store_true", default=False)
+    p.add_argument("--ssl",            action="store_true", default=False)
+    p.add_argument("--sni",            default=None)
+    p.add_argument("--http-port",      default=None, type=int, dest="http_port")
 
-    # ── ficheros / listas ─────────────────────────────────────────────────────
-    p.add_argument("--userlist",       default=None,   help="Wordlist de usuarios")
-    p.add_argument("--passlist",       default=None,   help="Wordlist de passwords")
-    p.add_argument("--wordlist",       default=None,   help="Wordlist genérica (dir brute, etc.)")
+    # listas
+    p.add_argument("--userlist",       default=None)
+    p.add_argument("--passlist",       default=None)
+    p.add_argument("--wordlist",       default=None)
 
-    # ── SMB específico ────────────────────────────────────────────────────────
-    p.add_argument("--share",          default=None,   help="Share SMB concreto")
-    p.add_argument("--ext",            default=None,   help="Extensiones a buscar (ej: .txt,.kdbx)")
-    p.add_argument("--keywords",       default=None,   help="Palabras clave en nombres de fichero")
-    p.add_argument("--depth",          default=None, type=int, help="Profundidad de recursión")
+    # SMB
+    p.add_argument("--share",          default=None)
+    p.add_argument("--ext",            default=None)
+    p.add_argument("--keywords",       default=None)
+    p.add_argument("--depth",          default=None, type=int)
 
-    # ── Kerberos específico ───────────────────────────────────────────────────
-    p.add_argument("--spn",            default=None,   help="SPN objetivo (ej: cifs/DC01.CORP.LOCAL)")
-    p.add_argument("--ccache",         default=None,   help="Ruta al fichero .ccache")
-    p.add_argument("--kirbi",          default=None,   help="Ruta al fichero .kirbi")
-    p.add_argument("--krbtgt-hash",    default=None, dest="krbtgt_hash",
-                   help="Hash NT del krbtgt")
-    p.add_argument("--service-hash",   default=None, dest="service_hash",
-                   help="Hash NT de la cuenta de servicio")
-    p.add_argument("--domain-sid",     default=None, dest="domain_sid",
-                   help="SID del dominio (S-1-5-21-...)")
-    p.add_argument("--user-id",        default=None, type=int, dest="user_id",
-                   help="RID del usuario a impersonar (default: 500)")
-    p.add_argument("--groups",         default=None,
-                   help="RIDs de grupos separados por coma")
-    p.add_argument("--target-user",    default=None, dest="target_user",
-                   help="Usuario objetivo a impersonar")
-    p.add_argument("--target-computer",default=None, dest="target_computer",
-                   help="Nombre del equipo objetivo")
-    p.add_argument("--attacker-account",default=None, dest="attacker_account",
-                   help="Cuenta controlada por el atacante")
-    p.add_argument("--cert",           default=None,   help="Ruta al certificado .pem")
-    p.add_argument("--pfx",            default=None,   help="Ruta al certificado .pfx")
-    p.add_argument("--template",       default=None,   help="Plantilla ADCS")
-    p.add_argument("--ca",             default=None,   help="CA authority (ej: CORP-CA)")
-    p.add_argument("--alt-name",       default=None, dest="alt_name",
-                   help="Nombre alternativo para el certificado")
-    p.add_argument("--dc-name",        default=None, dest="dc_name",
-                   help="Nombre del DC (para noPac)")
-    p.add_argument("--user-sid",       default=None, dest="user_sid",
-                   help="SID del usuario (para ms14-068)")
-    p.add_argument("--vector",         default=None,
-                   help="Vector de ataque (kerber-loss)")
-    p.add_argument("--new-password",   default=None, dest="new_password",
-                   help="Nueva contraseña a establecer")
+    # Kerberos
+    p.add_argument("--spn",            default=None)
+    p.add_argument("--ccache",         default=None)
+    p.add_argument("--kirbi",          default=None)
+    p.add_argument("--krbtgt-hash",    default=None, dest="krbtgt_hash")
+    p.add_argument("--service-hash",   default=None, dest="service_hash")
+    p.add_argument("--domain-sid",     default=None, dest="domain_sid")
+    p.add_argument("--user-id",        default=None, type=int, dest="user_id")
+    p.add_argument("--groups",         default=None)
+    p.add_argument("--target-user",    default=None, dest="target_user")
+    p.add_argument("--target-computer",default=None, dest="target_computer")
+    p.add_argument("--attacker-account",default=None, dest="attacker_account")
+    p.add_argument("--cert",           default=None)
+    p.add_argument("--pfx",            default=None)
+    p.add_argument("--template",       default=None)
+    p.add_argument("--ca",             default=None)
+    p.add_argument("--alt-name",       default=None, dest="alt_name")
+    p.add_argument("--dc-name",        default=None, dest="dc_name")
+    p.add_argument("--user-sid",       default=None, dest="user_sid")
+    p.add_argument("--vector",         default=None)
+    p.add_argument("--new-password",   default=None, dest="new_password")
 
-    # ── LDAP específico ───────────────────────────────────────────────────────
-    p.add_argument("--target-dn",      default=None, dest="target_dn",
-                   help="DN del objeto LDAP objetivo")
-    p.add_argument("--target-obj",     default=None, dest="target_obj",
-                   help="DN/sAMAccountName objetivo (acl-abuse)")
-    p.add_argument("--out-dir",        default=None, dest="out_dir",
-                   help="Directorio de salida (bloodhound)")
-    p.add_argument("--save-list",      default=None, dest="save_list",
-                   help="Ruta para guardar lista resultante")
-    p.add_argument("--filter-flag",    default=None, dest="filter_flag",
-                   help="Filtro por flag UAC")
-    p.add_argument("--enabled-only",   action="store_true", default=False,
-                   dest="enabled_only", help="Solo cuentas habilitadas")
-    p.add_argument("--privileged-only",action="store_true", default=False,
-                   dest="privileged_only", help="Solo grupos privilegiados")
-    p.add_argument("--os-filter",      default=None, dest="os_filter",
-                   help="Filtro por sistema operativo")
-    p.add_argument("--undeleg",        action="store_true", default=False,
-                   help="Solo equipos con delegación sin restricciones")
-    p.add_argument("--action",         default=None,
-                   help="Acción ACL (detect/reset-password/add-member/...)")
-    p.add_argument("--source-user",    default=None, dest="source_user",
-                   help="Usuario origen del ACE")
-    p.add_argument("--save-key",       default=None, dest="save_key",
-                   help="Ruta para guardar clave privada (shadow-creds)")
-    p.add_argument("--mode",           default=None,
-                   help="Modo relay (add-da/rbcd/dump/shadow-creds)")
-    p.add_argument("--relay-target-user", default=None, dest="relay_target_user",
-                   help="Usuario objetivo del relay")
+    # LDAP
+    p.add_argument("--target-dn",      default=None, dest="target_dn")
+    p.add_argument("--target-obj",     default=None, dest="target_obj")
+    p.add_argument("--out-dir",        default=None, dest="out_dir")
+    p.add_argument("--save-list",      default=None, dest="save_list")
+    p.add_argument("--filter-flag",    default=None, dest="filter_flag")
+    p.add_argument("--enabled-only",   action="store_true", default=False, dest="enabled_only")
+    p.add_argument("--privileged-only",action="store_true", default=False, dest="privileged_only")
+    p.add_argument("--os-filter",      default=None, dest="os_filter")
+    p.add_argument("--undeleg",        action="store_true", default=False)
+    p.add_argument("--action",         default=None)
+    p.add_argument("--source-user",    default=None, dest="source_user")
+    p.add_argument("--save-key",       default=None, dest="save_key")
+    p.add_argument("--mode",           default=None)
+    p.add_argument("--relay-target-user", default=None, dest="relay_target_user")
     p.add_argument("--continue-on-lockout", action="store_true", default=False,
-                   dest="continue_on_lockout",
-                   help="Continuar aunque se detecte lockout")
+                   dest="continue_on_lockout")
 
-    # ── MSSQL específico ──────────────────────────────────────────────────────
-    p.add_argument("--command",        default=None,
-                   help="Comando OS a ejecutar (xp_cmdshell)")
-    p.add_argument("--query",          default=None,
-                   help="Query SQL arbitraria")
-    p.add_argument("--attacker-ip",    default=None, dest="attacker_ip",
-                   help="IP del atacante (NTLM steal)")
+    # MSSQL
+    p.add_argument("--command",        default=None)
+    p.add_argument("--query",          default=None)
+    p.add_argument("--attacker-ip",    default=None, dest="attacker_ip")
 
-    # ── FTP específico ────────────────────────────────────────────────────────
-    p.add_argument("--delay",          default=None, type=float,
-                   help="Delay entre intentos (segundos)")
+    # FTP / delay
+    p.add_argument("--delay",          default=None, type=float)
 
-    # ── HTTP/HTTPS específico ─────────────────────────────────────────────────
-    p.add_argument("--path",           default=None,
-                   help="Ruta HTTP inicial (default: /)")
-    p.add_argument("--param",          default=None,
-                   help="Parámetro a inyectar (sqli, xss, lfi, ssrf)")
-    p.add_argument("--listener",       default=None,
-                   help="Dominio OOB para log4shell")
-    p.add_argument("--client-id",      default=None, dest="client_id",
-                   help="Client ID OAuth (oauth-misconfig)")
-    p.add_argument("--max-depth",      default=None, type=int, dest="max_depth",
-                   help="Profundidad máxima de crawling")
-    p.add_argument("--max-pages",      default=None, type=int, dest="max_pages",
-                   help="Páginas máximas de crawling")
+    # HTTP/HTTPS
+    p.add_argument("--path",           default=None)
+    p.add_argument("--param",          default=None)
+    p.add_argument("--listener",       default=None)
+    p.add_argument("--client-id",      default=None, dest="client_id")
+    p.add_argument("--max-depth",      default=None, type=int, dest="max_depth")
+    p.add_argument("--max-pages",      default=None, type=int, dest="max_pages")
 
 
 def build_parser():
@@ -337,27 +301,24 @@ def build_parser():
         prog="lobera",
         description="Lobera — AD enumeration & attack toolkit",
     )
+    # Flag global de idioma (procesado antes de parse_args)
+    parser.add_argument("--lang", default=None, metavar="LANG",
+                        help="Cambia el idioma: es | en")
+
     subs = parser.add_subparsers(dest="module", metavar="módulo")
 
-    # ── Protocolos ──────────────────────────────────────────────────────────
     proto_help = {
-        "smb":      "Scripts SMB",
-        "kerberos": "Scripts Kerberos",
-        "rpc":      "Scripts RPC",
-        "ldap":     "Scripts LDAP",
-        "winrm":    "Scripts WinRM",
-        "ssh":      "Scripts SSH",
-        "ssl":      "Scripts SSL",
-        "http":     "Scripts HTTP",
-        "https":    "Scripts HTTPS",
-        "ftp":      "Scripts FTP",
-        "mssql":    "Scripts MSSQL",
+        "smb": "Scripts SMB", "kerberos": "Scripts Kerberos",
+        "rpc": "Scripts RPC", "ldap": "Scripts LDAP",
+        "winrm": "Scripts WinRM", "ssh": "Scripts SSH",
+        "ssl": "Scripts SSL", "http": "Scripts HTTP",
+        "https": "Scripts HTTPS", "ftp": "Scripts FTP",
+        "mssql": "Scripts MSSQL",
     }
     for proto, help_text in proto_help.items():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
-    # ── db ──────────────────────────────────────────────────────────────────
     db_p = subs.add_parser("db", help="Base de datos de sesión")
     db_s = db_p.add_subparsers(dest="db_action", metavar="acción")
 
@@ -385,20 +346,77 @@ def main():
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
-    init_db()
+    # ── 1. Inicializar DB ─────────────────────────────────────────────────
+    first_run = init_db()
 
+    # ── 2. Idioma ─────────────────────────────────────────────────────────
+    from core.i18n import set_lang, get_lang
+    from core.lang_selector import (
+        select_language_interactive,
+        apply_lang_from_db,
+        cmd_change_lang,
+    )
+    from core.session_db import get_setting, save_setting
+
+    # Detectar --lang en argv antes de parsear (para que afecte al banner)
+    lang_override = None
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg.startswith("--lang="):
+            lang_override = arg.split("=", 1)[1].strip().lower()
+            break
+        if arg == "--lang" and i + 1 < len(sys.argv) - 1:
+            lang_override = sys.argv[i + 2].strip().lower()
+            break
+
+    if lang_override:
+        if cmd_change_lang(lang_override):
+            save_setting("lang", get_lang())
+        # Si el único argumento era --lang, salir tras confirmar el cambio
+        non_lang_args = [a for a in sys.argv[1:]
+                         if not a.startswith("--lang") and a != lang_override]
+        if not non_lang_args:
+            return
+    elif first_run:
+        # Primera ejecución: preguntar idioma antes del banner
+        chosen = select_language_interactive()
+        save_setting("lang", chosen)
+    else:
+        # Cargar preferencia guardada
+        saved_lang = get_setting("lang", "es")
+        apply_lang_from_db(saved_lang)
+
+    # ── 3. Auth ───────────────────────────────────────────────────────────
     from core.auth import login
     if not login():
         sys.exit(1)
 
+    # ── 4. Banner ─────────────────────────────────────────────────────────
+    show_banner()
+
+    # ── 5. Parsear args (filtrando --lang para que argparse no se queje) ──
+    filtered_argv = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("--lang="):
+            continue
+        if arg == "--lang":
+            skip_next = True
+            continue
+        filtered_argv.append(arg)
+
     parser = build_parser()
-    args   = parser.parse_args()
+    args   = parser.parse_args(filtered_argv)
+
+    # ── 6. Dispatch ───────────────────────────────────────────────────────
+    from core.i18n import T
 
     if args.module is None:
-        show_banner()
-        console.print("[yellow]No se ha especificado ningún módulo.[/yellow]")
+        console.print(f"[yellow]{T('no_module')}[/yellow]")
         console.print(
-            "Módulos disponibles: "
+            f"{T('modules_available')}: "
             "[bold green]smb[/bold green] · "
             "[bold magenta]kerberos[/bold magenta] · "
             "[bold blue]rpc[/bold blue] · "
@@ -412,31 +430,24 @@ def main():
             "[bold bright_red]mssql[/bold bright_red] · "
             "[bold white]db[/bold white]"
         )
-        console.print("[dim]lobera.py <módulo>                    → árbol de scripts disponibles[/dim]")
-        console.print("[dim]lobera.py <módulo> --script=<nombre>  → ver parámetros / ejecutar[/dim]")
-        console.print("[dim]lobera.py <módulo> --scanner          → autopwn scanner[/dim]")
-        console.print("[dim]lobera.py <módulo> --interactive-shell → consola interactiva[/dim]\n")
+        console.print(f"[dim]lobera.py <módulo>                    → {T('usage_list')}[/dim]")
+        console.print(f"[dim]lobera.py <módulo> --script=<nombre>  → {T('usage_script')}[/dim]")
+        console.print(f"[dim]lobera.py <módulo> --scanner          → {T('usage_scanner')}[/dim]")
+        console.print(f"[dim]lobera.py <módulo> --interactive-shell → {T('usage_shell')}[/dim]")
+        console.print(f"[dim]lobera.py --lang=en                   → cambiar idioma[/dim]\n")
         return
 
     dispatch = {
-        "smb":      run_smb,
-        "kerberos": run_kerberos,
-        "rpc":      run_rpc,
-        "ldap":     run_ldap,
-        "winrm":    run_winrm,
-        "ssh":      run_ssh,
-        "ssl":      run_ssl,
-        "http":     run_http,
-        "https":    run_https,
-        "ftp":      run_ftp,
-        "mssql":    run_mssql,
-        "db":       run_db,
+        "smb": run_smb, "kerberos": run_kerberos, "rpc": run_rpc,
+        "ldap": run_ldap, "winrm": run_winrm, "ssh": run_ssh,
+        "ssl": run_ssl, "http": run_http, "https": run_https,
+        "ftp": run_ftp, "mssql": run_mssql, "db": run_db,
     }
     runner = dispatch.get(args.module)
     if runner:
         runner(args)
     else:
-        console.print(f"[red]Módulo desconocido: {args.module}[/red]")
+        console.print(f"[red]{T('err_unknown_module')}: {args.module}[/red]")
 
 
 if __name__ == "__main__":

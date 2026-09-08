@@ -466,3 +466,31 @@ def clear_session():
     cur.execute("DELETE FROM session WHERE id = 1")
     conn.commit()
     conn.close()
+
+_SETTINGS_TABLE = """
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    )
+"""
+
+def get_setting(key: str, default: str = "") -> str:
+    conn = _connect()
+    cur  = conn.cursor()
+    cur.execute(_SETTINGS_TABLE)
+    cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cur.fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+def save_setting(key: str, value: str):
+    conn = _connect()
+    cur  = conn.cursor()
+    cur.execute(_SETTINGS_TABLE)
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value)
+    )
+    conn.commit()
+    conn.close()

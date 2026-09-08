@@ -1,19 +1,7 @@
 # modules/classic.py
 """
 Modo clasico de Lobera — sin prompts interactivos.
-
-Flujo:
-  python3 lobera.py smb
-      -> lista scripts del protocolo agrupados por familia
-
-  python3 lobera.py smb --script=null-session
-      -> muestra parametros requeridos y opcionales con ejemplos de uso
-
-  python3 lobera.py smb --script=null-session -t 10.10.10.5
-      -> si faltan obligatorios: avisa. Si estan todos: ejecuta.
-
-  python3 lobera.py smb --script-fam=enum -t 10.10.10.5
-      -> ejecuta todos los scripts de la familia con los params dados
+Todos los strings de UI pasan por T() para soporte i18n.
 """
 
 import ast as _ast
@@ -30,6 +18,7 @@ from rich import box
 from core.output import console
 from core.target import Target
 from core.credentials import Creds
+from core.i18n import T, TLabel
 from scripts.base import BaseScript
 
 
@@ -110,7 +99,7 @@ def _import_cls(py_path, root_path):
     try:
         mod = importlib.import_module(mod_path)
     except Exception as e:
-        console.print("[red]Error importando script: " + str(e) + "[/red]")
+        console.print(f"[red]{T('import_error')}: {e}[/red]")
         return None
     for _, obj in inspect.getmembers(mod, inspect.isclass):
         if obj is not BaseScript and issubclass(obj, BaseScript):
@@ -121,70 +110,31 @@ def _import_cls(py_path, root_path):
 # ── obtener valor de param desde args ────────────────────────────────────────
 
 _PARAM_TO_ARG = {
-    "target":              "target",
-    "user":                "user",
-    "password":            "password",
-    "hash":                "hash",
-    "domain":              "domain",
-    "timeout":             "timeout",
-    "port":                "port",
-    "instance":            "instance",
-    "ldaps":               "ldaps",
-    "ssl":                 "ssl",
-    "sni":                 "sni",
-    "http_port":           "http_port",
-    "userlist":            "userlist",
-    "passlist":            "passlist",
-    "wordlist":            "wordlist",
-    "delay":               "delay",
-    "share":               "share",
-    "ext":                 "ext",
-    "keywords":            "keywords",
-    "depth":               "depth",
-    "spn":                 "spn",
-    "ccache":              "ccache",
-    "kirbi":               "kirbi",
-    "krbtgt_hash":         "krbtgt_hash",
-    "service_hash":        "service_hash",
-    "domain_sid":          "domain_sid",
-    "user_id":             "user_id",
-    "groups":              "groups",
-    "target_user":         "target_user",
-    "target_computer":     "target_computer",
-    "attacker_account":    "attacker_account",
-    "cert":                "cert",
-    "pfx":                 "pfx",
-    "template":            "template",
-    "ca":                  "ca",
-    "alt_name":            "alt_name",
-    "dc_name":             "dc_name",
-    "user_sid":            "user_sid",
-    "vector":              "vector",
-    "new_password":        "new_password",
-    "target_dn":           "target_dn",
-    "target_obj":          "target_obj",
-    "out_dir":             "out_dir",
-    "save_list":           "save_list",
-    "filter_flag":         "filter_flag",
-    "enabled_only":        "enabled_only",
-    "privileged_only":     "privileged_only",
-    "os_filter":           "os_filter",
-    "undeleg":             "undeleg",
-    "action":              "action",
-    "source_user":         "source_user",
-    "save_key":            "save_key",
-    "mode":                "mode",
-    "relay_target_user":   "relay_target_user",
+    "target": "target", "user": "user", "password": "password",
+    "hash": "hash", "domain": "domain", "timeout": "timeout",
+    "port": "port", "instance": "instance", "ldaps": "ldaps",
+    "ssl": "ssl", "sni": "sni", "http_port": "http_port",
+    "userlist": "userlist", "passlist": "passlist", "wordlist": "wordlist",
+    "delay": "delay", "share": "share", "ext": "ext",
+    "keywords": "keywords", "depth": "depth", "spn": "spn",
+    "ccache": "ccache", "kirbi": "kirbi", "krbtgt_hash": "krbtgt_hash",
+    "service_hash": "service_hash", "domain_sid": "domain_sid",
+    "user_id": "user_id", "groups": "groups", "target_user": "target_user",
+    "target_computer": "target_computer", "attacker_account": "attacker_account",
+    "cert": "cert", "pfx": "pfx", "template": "template", "ca": "ca",
+    "alt_name": "alt_name", "dc_name": "dc_name", "user_sid": "user_sid",
+    "vector": "vector", "new_password": "new_password",
+    "target_dn": "target_dn", "target_obj": "target_obj",
+    "out_dir": "out_dir", "save_list": "save_list",
+    "filter_flag": "filter_flag", "enabled_only": "enabled_only",
+    "privileged_only": "privileged_only", "os_filter": "os_filter",
+    "undeleg": "undeleg", "action": "action", "source_user": "source_user",
+    "save_key": "save_key", "mode": "mode",
+    "relay_target_user": "relay_target_user",
     "continue_on_lockout": "continue_on_lockout",
-    "command":             "command",
-    "query":               "query",
-    "attacker_ip":         "attacker_ip",
-    "path":                "path",
-    "param":               "param",
-    "listener":            "listener",
-    "client_id":           "client_id",
-    "max_depth":           "max_depth",
-    "max_pages":           "max_pages",
+    "command": "command", "query": "query", "attacker_ip": "attacker_ip",
+    "path": "path", "param": "param", "listener": "listener",
+    "client_id": "client_id", "max_depth": "max_depth", "max_pages": "max_pages",
 }
 
 
@@ -239,16 +189,16 @@ def _cast_extra_kwargs(meta, args):
 def list_scripts(protocol, root_path, color="white"):
     registry = _build_registry(protocol, root_path)
     if not registry:
-        console.print("[yellow]No se encontraron scripts para '" + protocol + "'.[/yellow]")
+        console.print(f"[yellow]{T('script_not_found', name='*', proto=protocol)}[/yellow]")
         return
 
     families = {}
     for meta in registry.values():
         families.setdefault(meta["family"], []).append(meta)
 
-    tree = Tree("[bold " + color + "]" + protocol.upper() + "[/bold " + color + "]")
+    tree = Tree(f"[bold {color}]{protocol.upper()}[/bold {color}]")
     for fam in sorted(families):
-        branch = tree.add("[bold " + color + "]" + fam + "[/bold " + color + "]")
+        branch = tree.add(f"[bold {color}]{fam}[/bold {color}]")
         for meta in sorted(families[fam], key=lambda m: m["name"]):
             from rich.text import Text
             label = Text()
@@ -258,20 +208,16 @@ def list_scripts(protocol, root_path, color="white"):
             branch.add(label)
     console.print(tree)
     console.print()
-    console.print("  [dim]--script=<nombre>             ejecuta un script[/dim]")
-    console.print("  [dim]--script-fam=<familia>        ejecuta toda una familia[/dim]")
-    console.print("  [dim]--interactive-shell            consola interactiva[/dim]")
-    console.print("  [dim]--scanner                      autopwn scanner[/dim]")
+    console.print(f"  [dim]--script=<{T('col_type').lower()}>             {T('usage_script')}[/dim]")
+    console.print(f"  [dim]--script-fam=<familia>        {T('usage_fam')}[/dim]")
+    console.print(f"  [dim]--interactive-shell            {T('usage_shell')}[/dim]")
+    console.print(f"  [dim]--scanner                      {T('usage_scanner')}[/dim]")
     console.print()
 
 
-# ── mostrar parametros / ejecutar ─────────────────────────────────────────────
+# ── mostrar parametros ────────────────────────────────────────────────────────
 
 def _show_params(protocol, script_name, sp_meta, param_labels, color, args):
-    """
-    Muestra los parametros requeridos y opcionales.
-    Devuelve la lista de obligatorios que faltan.
-    """
     req  = sp_meta.get("required", [])
     opt  = sp_meta.get("optional", [])
     defs = sp_meta.get("defaults", {})
@@ -280,95 +226,80 @@ def _show_params(protocol, script_name, sp_meta, param_labels, color, args):
 
     console.print()
     console.print(Panel(
-        "[bold white]" + script_name.upper() + "[/bold white]"
-        "  [dim]— [bold " + color + "]" + protocol.upper()
-        + "[/bold " + color + "] / " + sp_meta.get("family", "") + "[/dim]\n\n"
-        + sp_meta.get("description", ""),
-        title="[bold " + color + "]SCRIPT[/bold " + color + "]",
+        f"[bold white]{script_name.upper()}[/bold white]"
+        f"  [dim]— [bold {color}]{protocol.upper()}[/bold {color}] / {sp_meta.get('family', '')}[/dim]\n\n"
+        f"{sp_meta.get('description', '')}",
+        title=f"[bold {color}]{T('script_selected')}[/bold {color}]",
         border_style=color, expand=False,
     ))
 
     if req:
-        console.print("[bold]PARÁMETROS REQUERIDOS[/bold]\n")
+        console.print(f"[bold]{T('required_params')}[/bold]\n")
         for p in req:
-            label   = param_labels.get(p, p)
+            label   = param_labels.get(p, TLabel(p))
             default = defs.get(p, "")
             val     = _get_param_value(p, args)
             given   = val is not None and val != "" and val is not False
-            flag    = "--" + p.replace("_", "-") if len(p) > 1 else "-" + p
+            flag    = f"--{p.replace('_', '-')}" if len(p) > 1 else f"-{p}"
             if given:
                 console.print(
-                    "  [bold green]✓[/bold green]  "
-                    + flag + " [cyan]" + str(val) + "[/cyan]"
-                    + "  [dim](" + label + ")[/dim]"
+                    f"  [bold green]✓[/bold green]  {flag} [cyan]{val}[/cyan]"
+                    + (f"  [dim]({T('default_label')}: {default})[/dim]" if default not in (None, "") else "")
+                    + f"  [dim]({label})[/dim]"
                 )
             else:
-                default_str = (
-                    "  [dim](default: " + str(default) + ")[/dim]"
-                    if default not in (None, "") else ""
-                )
                 console.print(
-                    "  [bold red]*[/bold red]  "
-                    + flag + " <valor>"
-                    + default_str
-                    + "  [dim](" + label + ")[/dim]"
+                    f"  [bold red]*[/bold red]  {flag} <valor>"
+                    + (f"  [dim]({T('default_label')}: {default})[/dim]" if default not in (None, "") else "")
+                    + f"  [dim]({label})[/dim]"
                 )
         console.print()
 
     if opt:
-        console.print("[bold]PARÁMETROS OPCIONALES[/bold]\n")
+        console.print(f"[bold]{T('optional_params')}[/bold]\n")
         for p in opt:
-            label   = param_labels.get(p, p)
+            label   = param_labels.get(p, TLabel(p))
             default = defs.get(p, "")
             val     = _get_param_value(p, args)
             given   = val is not None and val != "" and val is not False
-            flag    = "--" + p.replace("_", "-")
-            default_str = (
-                "  [dim](default: " + str(default) + ")[/dim]"
-                if default not in (None, "") else ""
-            )
+            flag    = f"--{p.replace('_', '-')}"
             if given:
                 console.print(
-                    "  [bold green]✓[/bold green]  "
-                    + flag + " [cyan]" + str(val) + "[/cyan]"
-                    + default_str
-                    + "  [dim](" + label + ")[/dim]"
+                    f"  [bold green]✓[/bold green]  {flag} [cyan]{val}[/cyan]"
+                    + (f"  [dim]({T('default_label')}: {default})[/dim]" if default not in (None, "") else "")
+                    + f"  [dim]({label})[/dim]"
                 )
             else:
                 console.print(
-                    "  [dim]·[/dim]  "
-                    + flag + " <valor>"
-                    + default_str
-                    + "  [dim](" + label + ")[/dim]"
+                    f"  [dim]·[/dim]  {flag} <valor>"
+                    + (f"  [dim]({T('default_label')}: {default})[/dim]" if default not in (None, "") else "")
+                    + f"  [dim]({label})[/dim]"
                 )
         console.print()
 
     for group in sp_meta.get("mutually_exclusive", []):
         console.print(
-            "  [yellow]⚠[/yellow]  [dim]"
-            + " y ".join(group) + " son mutuamente excluyentes.[/dim]"
+            f"  [yellow]⚠[/yellow]  [dim]{' y '.join(group)} {T('mutually_exclusive')}[/dim]"
         )
 
-    # Ejemplo de uso
-    console.print("[bold]EJEMPLO DE USO[/bold]\n")
+    console.print(f"[bold]{T('usage_example')}[/bold]\n")
     example_req = " ".join(
-        "--" + p.replace("_", "-") + " <" + p + ">"
-        for p in req
+        f"--{p.replace('_', '-')} <{p}>" for p in req
     )
     console.print(
-        "  [dim]python3 lobera.py " + protocol
-        + " --script=" + script_name
-        + (" " + example_req if example_req else "")
+        f"  [dim]python3 lobera.py {protocol}"
+        f" --script={script_name}"
+        + (f" {example_req}" if example_req else "")
         + "[/dim]"
     )
     console.print()
 
     if missing_req:
         console.print(
-            "[red]Faltan parámetros obligatorios:[/red] "
-            + ", ".join("[bold]--" + p.replace("_", "-") + "[/bold]" for p in missing_req)
+            f"[red]{T('missing_params')}:[/red] "
+            + ", ".join(f"[bold]--{p.replace('_', '-')}[/bold]" for p in missing_req)
         )
-        console.print("[dim]Añádelos al comando y vuelve a ejecutar.[/dim]\n")
+        console.print(f"[dim]{T('add_and_retry')}[/dim]\n")
 
     return missing_req
 
@@ -376,12 +307,6 @@ def _show_params(protocol, script_name, sp_meta, param_labels, color, args):
 # ── run_script ────────────────────────────────────────────────────────────────
 
 def run_script(protocol, script_name, root_path, color="white", args=None):
-    """
-    python3 lobera.py <proto> --script=<nombre> [params...]
-
-    Sin params suficientes: muestra la ayuda de parametros y sale.
-    Con todos los obligatorios: ejecuta directamente.
-    """
     registry                   = _build_registry(protocol, root_path)
     shell_params, param_labels = _load_shell_params(protocol, root_path)
 
@@ -391,13 +316,9 @@ def run_script(protocol, script_name, root_path, color="white", args=None):
     )
     if not meta_disc:
         console.print(
-            "[red]Script '" + script_name
-            + "' no encontrado para '" + protocol + "'.[/red]"
+            f"[red]{T('script_not_found', name=script_name, proto=protocol)}[/red]"
         )
-        console.print(
-            "  [dim]Usa: python3 lobera.py " + protocol
-            + "  para ver los disponibles.[/dim]"
-        )
+        console.print(f"  [dim]{T('see_list', proto=protocol)}[/dim]")
         return
 
     sp_meta = dict(shell_params.get(script_name, {}))
@@ -405,41 +326,36 @@ def run_script(protocol, script_name, root_path, color="white", args=None):
     sp_meta["description"] = sp_meta.get("description") or meta_disc["description"]
 
     if args is None:
-        # Sin args: solo mostrar params sin marcar nada
         import argparse
         args = argparse.Namespace()
 
     missing = _show_params(protocol, script_name, sp_meta, param_labels, color, args)
 
     if missing:
-        return  # Faltan obligatorios, no ejecutar
+        return
 
-    # Todos presentes: ejecutar
     target, creds = _build_target_creds(args)
     kwargs        = _cast_extra_kwargs(sp_meta, args)
 
     cls = _import_cls(meta_disc["path"], root_path)
     if cls is None:
-        console.print("[red]No se pudo cargar el script.[/red]")
+        console.print(f"[red]{T('script_load_error')}[/red]")
         return
 
-    console.rule("[bold " + color + "]Ejecutando " + script_name + "[/bold " + color + "]")
+    console.rule(f"[bold {color}]{T('running')} {script_name}[/bold {color}]")
     try:
         cls(target, creds).run(**kwargs)
     except KeyboardInterrupt:
-        console.print("\n[dim]Script interrumpido.[/dim]")
+        console.print(f"\n[dim]{T('script_interrupted')}[/dim]")
     except Exception as e:
-        console.print("[red]Error: " + str(e) + "[/red]")
-    console.rule("[bold " + color + "]Fin " + script_name + "[/bold " + color + "]")
+        console.print(f"[red]{T('script_error')}: {e}[/red]")
+    console.rule(f"[bold {color}]{T('done')} {script_name}[/bold {color}]")
     console.print()
 
 
 # ── run_script_family ─────────────────────────────────────────────────────────
 
 def run_script_family(protocol, family, root_path, color="white", args=None):
-    """
-    python3 lobera.py <proto> --script-fam=<familia> [params...]
-    """
     registry                   = _build_registry(protocol, root_path)
     shell_params, param_labels = _load_shell_params(protocol, root_path)
 
@@ -447,22 +363,20 @@ def run_script_family(protocol, family, root_path, color="white", args=None):
     if not scripts_in_fam:
         available = sorted({m["family"] for m in registry.values()})
         console.print(
-            "[red]Familia '" + family
-            + "' no encontrada para '" + protocol + "'.[/red]"
+            f"[red]{T('family_not_found', fam=family, proto=protocol)}[/red]"
         )
-        console.print("  Familias disponibles: " + ", ".join(available))
+        console.print(f"  {T('families_available')}: {', '.join(available)}")
         return
 
     console.print()
     console.print(Panel(
-        "[bold white]FAMILIA: " + family.upper() + "[/bold white]"
-        "  [dim]— [bold " + color + "]" + protocol.upper()
-        + "[/bold " + color + "][/dim]\n\n"
+        f"[bold white]{T('family_selected').upper()}: {family.upper()}[/bold white]"
+        f"  [dim]— [bold {color}]{protocol.upper()}[/bold {color}][/dim]\n\n"
         + "\n".join(
-            "  • " + m["name"]
+            f"  • {m['name']}"
             for m in sorted(scripts_in_fam, key=lambda m: m["name"])
         ),
-        title="[bold " + color + "]EJECUTANDO FAMILIA[/bold " + color + "]",
+        title=f"[bold {color}]{T('running_family')}[/bold {color}]",
         border_style=color, expand=False,
     ))
     console.print()
@@ -481,29 +395,26 @@ def run_script_family(protocol, family, root_path, color="white", args=None):
         missing = [p for p in req if not _get_param_value(p, args)]
         if missing:
             console.print(
-                "[yellow]" + m["name"]
-                + " — omitido, faltan: " + ", ".join(missing) + "[/yellow]"
+                f"[yellow]{m['name']} — {T('omitted_missing')}: {', '.join(missing)}[/yellow]"
             )
             continue
 
         kwargs = _cast_extra_kwargs(sp_meta, args)
         cls    = _import_cls(m["path"], root_path)
         if cls is None:
-            console.print("[yellow]" + m["name"] + " — no se pudo cargar.[/yellow]")
+            console.print(f"[yellow]{m['name']} — {T('omitted_load')}[/yellow]")
             continue
 
-        console.rule(
-            "[bold " + color + "]Ejecutando " + m["name"] + "[/bold " + color + "]"
-        )
+        console.rule(f"[bold {color}]{T('running')} {m['name']}[/bold {color}]")
         try:
             cls(target, creds).run(**kwargs)
         except KeyboardInterrupt:
-            console.print("\n[dim]Script interrumpido.[/dim]")
+            console.print(f"\n[dim]{T('script_interrupted')}[/dim]")
         except Exception as e:
-            console.print("[red]Error en '" + m["name"] + "': " + str(e) + "[/red]")
+            console.print(f"[red]{T('script_error')} '{m['name']}': {e}[/red]")
         console.print()
 
     console.rule(
-        "[bold " + color + "]Familia '" + family + "' completada[/bold " + color + "]"
+        f"[bold {color}]{T('family_done', fam=family)}[/bold {color}]"
     )
     console.print()
