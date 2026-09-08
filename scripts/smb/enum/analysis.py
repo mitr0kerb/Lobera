@@ -165,7 +165,11 @@ class Script(BaseScript):
         try:
             conn = SMBConnection(ip, ip, timeout=timeout)
 
-            d = conn.getDialect()
+            d_raw = conn.getDialect()
+            try:
+                d = int(d_raw)
+            except (TypeError, ValueError):
+                d = 0
             r["dialect"] = {
                 SMB_DIALECT:      "SMBv1",
                 SMB2_DIALECT_002: "SMBv2.0",
