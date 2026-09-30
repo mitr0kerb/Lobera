@@ -426,6 +426,35 @@ def _show_params(protocol, script_name, sp_meta, param_labels, color, args):
     return missing_req
 
 
+# ── dry-run ───────────────────────────────────────────────────────────────────
+
+def _print_dry_run(protocol, script_name, target, creds, kwargs, color="white"):
+    """
+    Muestra lo que se ejecutaría sin lanzar nada real.
+    """
+    console.rule(f"[bold {color}]DRY-RUN — {protocol.upper()} · {script_name}[/bold {color}]")
+    console.print(f"  [bold]Objetivo:[/bold]  {target.ip or '?'}")
+    if target.domain:
+        console.print(f"  [bold]Dominio:[/bold]   {target.domain}")
+    if target.hostname:
+        console.print(f"  [bold]Hostname:[/bold]  {target.hostname}")
+    if not creds.is_null_session():
+        console.print(f"  [bold]Usuario:[/bold]   {creds.user or '?'}")
+        if creds.ccache:
+            console.print(f"  [bold]Auth:[/bold]      ccache:{creds.ccache}")
+        elif creds.hash:
+            console.print(f"  [bold]Auth:[/bold]      hash (pass-the-hash)")
+        else:
+            console.print(f"  [bold]Auth:[/bold]      contraseña")
+    else:
+        console.print(f"  [bold]Auth:[/bold]      null session")
+    if kwargs:
+        console.print(f"  [bold]Parámetros:[/bold]")
+        for k, v in kwargs.items():
+            console.print(f"    [dim]{k}:[/dim] {v}")
+    console.print("\n[yellow]⚠  Modo --dry-run: no se ha ejecutado nada.[/yellow]")
+
+
 # ── run_script ────────────────────────────────────────────────────────────────
 
 def run_script(protocol, script_name, root_path, color="white", args=None):
@@ -467,9 +496,13 @@ def run_script(protocol, script_name, root_path, color="white", args=None):
     if missing:
         return  # Faltan obligatorios, no ejecutar
 
-    # Todos presentes: ejecutar
+    # Todos presentes: ejecutar (o simular si --dry-run)
     target, creds = _build_target_creds(args)
     kwargs        = _cast_extra_kwargs(sp_meta, args)
+
+    if getattr(args, "dry_run", False):
+        _print_dry_run(protocol, script_name, target, creds, kwargs, color)
+        return
 
     cls = _import_cls(meta_disc["path"], root_path)
     if cls is None:

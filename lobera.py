@@ -159,6 +159,32 @@ def run_report(args):
     console.print(f"[bold green]Informe generado:[/bold green] {path}")
 
 
+def run_completion(args):
+    """Muestra instrucciones de instalación del autocompletado."""
+    import os
+    shell  = getattr(args, "shell", "bash") or "bash"
+    lobera_dir = os.path.dirname(os.path.abspath(__file__))
+    comp_dir   = os.path.join(lobera_dir, "tools", "completions")
+
+    if shell == "bash":
+        src = os.path.join(comp_dir, "lobera_completion.bash")
+        console.print(f"\n[bold cyan]Autocompletado Bash[/bold cyan]")
+        console.print(f"  Añade esta línea a tu [bold]~/.bashrc[/bold]:")
+        console.print(f"  [bold yellow]source {src}[/bold yellow]\n")
+        console.print(f"  O actívalo solo para esta sesión:")
+        console.print(f"  [bold yellow]source {src}[/bold yellow]\n")
+    elif shell == "zsh":
+        src = os.path.join(comp_dir, "lobera_completion.zsh")
+        console.print(f"\n[bold cyan]Autocompletado Zsh[/bold cyan]")
+        console.print(f"  Copia el fichero a la carpeta de funciones Zsh:")
+        console.print(f"  [bold yellow]cp {src} /usr/local/share/zsh/site-functions/_lobera[/bold yellow]")
+        console.print(f"  [bold yellow]autoload -Uz compinit && compinit[/bold yellow]")
+        console.print(f"  O actívalo solo para esta sesión:")
+        console.print(f"  [bold yellow]source {src}[/bold yellow]\n")
+    else:
+        console.print(f"[red]Shell no soportado: {shell}. Usa 'bash' o 'zsh'.[/red]")
+
+
 def run_smb(args):      _run_proto("smb",      args)
 def run_kerberos(args): _run_proto("kerberos", args)
 def run_rpc(args):      _run_proto("rpc",      args)
@@ -376,6 +402,10 @@ def _add_proto_flags(p):
     p.add_argument("--workers",        default=1, type=int,
                    help="Hilos paralelos en modo batch/CIDR (default: 1)")
 
+    # ── Dry-run ───────────────────────────────────────────────────────────────
+    p.add_argument("--dry-run",        action="store_true", dest="dry_run",
+                   help="Simular: mostrar lo que se ejecutaría sin hacerlo")
+
     # ── HTTP/HTTPS específico ─────────────────────────────────────────────────
     p.add_argument("--path",           default=None,
                    help="Ruta HTTP inicial (default: /)")
@@ -446,6 +476,11 @@ def build_parser():
     rep_p.add_argument("-o", "--output",  default=None,
                        help="Ruta de salida (auto-generada si se omite)")
 
+    # ── completion ────────────────────────────────────────────────────────────
+    comp_p = subs.add_parser("completion", help="Muestra instrucciones para instalar el autocompletado")
+    comp_p.add_argument("--shell", default="bash", choices=["bash", "zsh"],
+                        help="Shell de destino (bash o zsh)")
+
     return parser
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -501,8 +536,9 @@ def main():
         "https":    run_https,
         "ftp":      run_ftp,
         "mssql":    run_mssql,
-        "db":       run_db,
-        "report":   run_report,
+        "db":         run_db,
+        "report":     run_report,
+        "completion": run_completion,
     }
     runner = dispatch.get(args.module)
     if runner:
@@ -517,3 +553,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         console.print("\n[dim]Interrumpido.[/dim]")
         sys.exit(130)
+    finally:
+        # Cerrar todas las conexiones en caché al salir
+        try:
+            from core.conn_cache import conn_cache
+            if len(conn_cache) > 0:
+                conn_cache.close_all()
+        except Exception:
+            pass
