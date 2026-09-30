@@ -16,7 +16,7 @@ def show_banner():
     import pyfiglet
     art = pyfiglet.figlet_format("LOBERA", font="slant")
     console.print(f"[bold cyan]{art}[/bold cyan]")
-    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL[/dim]")
+    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan[/dim]")
     console.print("[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
 # ── Tablas de shells / scanners ───────────────────────────────────────────────
@@ -196,6 +196,33 @@ def run_http(args):     _run_proto("http",     args)
 def run_https(args):    _run_proto("https",    args)
 def run_ftp(args):      _run_proto("ftp",      args)
 def run_mssql(args):    _run_proto("mssql",    args)
+
+
+def run_scan(args):
+    """Dispatcher para el módulo scan (Go binary)."""
+    from core.target import Target
+    from core.credentials import Credentials
+    from scripts.scan.port_scan import Script
+
+    target_str = getattr(args, "target", None) or getattr(args, "t", None)
+    if not target_str:
+        console.print("[red]Falta -t <objetivo>[/red]")
+        console.print("  Ejemplos:")
+        console.print("    lobera.py scan -t 10.10.10.5")
+        console.print("    lobera.py scan -t 10.10.10.0/24")
+        console.print("    lobera.py scan -t 10.10.10.1-50 -p all")
+        return
+
+    target = Target(ip=target_str)
+    creds  = Credentials()
+    script = Script(target=target, creds=creds)
+    script.run(
+        ports   = getattr(args, "ports",   None),
+        threads = getattr(args, "threads", 200),
+        timeout = getattr(args, "scan_timeout", 500),
+        banners = getattr(args, "banners", False),
+        closed  = getattr(args, "closed",  False),
+    )
 
 # ── db ────────────────────────────────────────────────────────────────────────
 
@@ -447,6 +474,21 @@ def build_parser():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
+    # ── scan (Go binary) ─────────────────────────────────────────────────────
+    scan_p = subs.add_parser("scan", help="Scanner de puertos y servicios (Go) — IP, CIDR o rango")
+    scan_p.add_argument("-t", "--target",  required=True,
+                        help="IP, CIDR o rango (ej: 10.10.10.0/24, 10.10.10.1-50)")
+    scan_p.add_argument("-p", "--ports",   default="ad",
+                        help="ad (default) | all | 80,443,445 | 80-1000")
+    scan_p.add_argument("--threads",       default=200, type=int,
+                        help="Goroutines paralelas (default: 200)")
+    scan_p.add_argument("--timeout",       default=500, type=int, dest="scan_timeout",
+                        help="Timeout por puerto en ms (default: 500)")
+    scan_p.add_argument("--banners",       action="store_true",
+                        help="Intentar leer banner de puertos abiertos")
+    scan_p.add_argument("--closed",        action="store_true",
+                        help="Mostrar también puertos cerrados")
+
     # ── db ──────────────────────────────────────────────────────────────────
     db_p = subs.add_parser("db", help="Base de datos de sesión")
     db_s = db_p.add_subparsers(dest="db_action", metavar="acción")
@@ -536,6 +578,7 @@ def main():
         "https":    run_https,
         "ftp":      run_ftp,
         "mssql":    run_mssql,
+        "scan":       run_scan,
         "db":         run_db,
         "report":     run_report,
         "completion": run_completion,
