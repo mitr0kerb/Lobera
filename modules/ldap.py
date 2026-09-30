@@ -255,7 +255,7 @@ class LDAPModule:
     def connect(self):
         """
         Abre la conexión TCP al DC y realiza el bind LDAP.
-        Soporta: password, pass-the-hash (NTLM), null/anonymous.
+        Soporta: password, pass-the-hash (NTLM), ccache (Kerberos), null/anonymous.
         Retorna True si tiene éxito, False en caso contrario.
         """
         try:
@@ -281,7 +281,17 @@ class LDAPModule:
                 )
 
             # Bind
-            if self.creds.is_null_session():
+            if self.creds.ccache:
+                import os
+                os.environ["KRB5CCNAME"] = self.creds.ccache
+                conn.kerberosLogin(
+                    self.creds.user, "", domain,
+                    lmhash="", nthash="", aesKey="",
+                    kdcHost=target_host,
+                )
+                print_result("LDAP", self.target.ip, "pwned",
+                             "bind Kerberos (ccache) como {}".format(self.creds.user))
+            elif self.creds.is_null_session():
                 conn.login("", "", "", "", "")
                 print_result("LDAP", self.target.ip, "ok", "enlace anónimo")
             elif self.creds.hash:

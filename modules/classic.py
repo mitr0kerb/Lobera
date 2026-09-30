@@ -249,11 +249,14 @@ def _build_target_creds(args):
         except Exception:
             pass  # La correlación falla en silencio
 
+    ccache = getattr(args, "ccache", None)
+
     creds = Creds(
         user=user,
         password=password,
         domain=domain,
         hash=hash_,
+        ccache=ccache,
     )
     return target, creds
 

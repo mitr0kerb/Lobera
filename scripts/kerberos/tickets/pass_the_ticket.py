@@ -29,11 +29,13 @@ from core.output import print_result, console
 from core import session_db
 
 
-class PassTheTicketScript(BaseScript):
-    name = "pass-the-ticket"
+class Script(BaseScript):
+    name        = "pass-the-ticket"
+    protocol    = "kerberos"
+    category    = "tickets"
     description = "Importa un ticket .ccache/.kirbi y lo activa para la sesión actual"
 
-    examples = [
+    EXAMPLES = [
         {"flag": "--ccache",
          "desc": "Ruta a un fichero .ccache (formato MIT Kerberos)",
          "good": "kerberos --script=pass-the-ticket --ccache /tmp/admin.ccache",
