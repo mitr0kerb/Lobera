@@ -65,7 +65,8 @@ _SCANNER_FUNCS = {
 
 # ── Dispatcher genérico ───────────────────────────────────────────────────────
 
-def _run_proto(protocol, args):
+def _run_proto_single(protocol, args):
+    """Ejecuta el protocolo contra un único objetivo ya fijado en args.target."""
     root  = _ROOT
     color = _PROTO_COLORS.get(protocol, "white")
 
@@ -91,7 +92,6 @@ def _run_proto(protocol, args):
     from modules.classic import list_scripts, run_script, run_script_family
 
     if script:
-        # Modo clásico: muestra params si faltan, ejecuta si están todos
         run_script(protocol, script, root, color, args)
         return
 
@@ -101,6 +101,51 @@ def _run_proto(protocol, args):
 
     # Sin flags: listar scripts
     list_scripts(protocol, root, color)
+
+
+def _run_proto(protocol, args):
+    """
+    Punto de entrada principal. Si -t contiene CIDR/rango/lista, expande
+    los objetivos y los procesa en paralelo con --workers hilos.
+    """
+    from core.cidr import expand_targets
+    import copy, types
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    raw_target = getattr(args, "target", None)
+    targets    = expand_targets(raw_target)
+
+    # Sin expansión (IP única o hostname sin CIDR): ruta directa
+    if not targets or len(targets) == 1:
+        if targets:
+            args.target = targets[0]
+        _run_proto_single(protocol, args)
+        return
+
+    # Modo multi-objetivo
+    workers = int(getattr(args, "workers", None) or 1)
+    console.print(
+        f"[bold]Modo batch:[/bold] {len(targets)} objetivo(s) · {workers} hilo(s)"
+    )
+
+    def _run_one(ip):
+        # Crea una copia de args con el target individual
+        args_copy = copy.copy(args)
+        args_copy.target = ip
+        _run_proto_single(protocol, args_copy)
+
+    if workers == 1:
+        for ip in targets:
+            _run_one(ip)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(_run_one, ip): ip for ip in targets}
+            for fut in as_completed(futs):
+                ip = futs[fut]
+                try:
+                    fut.result()
+                except Exception as exc:
+                    console.print(f"[red]Error en {ip}: {exc}[/red]")
 
 
 # ── Funciones por protocolo ───────────────────────────────────────────────────
@@ -317,6 +362,10 @@ def _add_proto_flags(p):
                    help="Delay fijo entre intentos de spray (segundos)")
     p.add_argument("--jitter",         default=None, type=float,
                    help="Variación aleatoria adicional al delay (0..N segundos)")
+
+    # ── Modo batch / CIDR ─────────────────────────────────────────────────────
+    p.add_argument("--workers",        default=1, type=int,
+                   help="Hilos paralelos en modo batch/CIDR (default: 1)")
 
     # ── HTTP/HTTPS específico ─────────────────────────────────────────────────
     p.add_argument("--path",           default=None,
