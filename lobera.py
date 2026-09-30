@@ -198,6 +198,35 @@ def run_ftp(args):      _run_proto("ftp",      args)
 def run_mssql(args):    _run_proto("mssql",    args)
 
 
+def run_exploit(args):
+    """Dispatcher para módulos de explotación (C binaries + Python wrappers)."""
+    from core.target import Target
+    from core.credentials import Credentials
+
+    sub = getattr(args, "exploit_module", None)
+    target = Target(ip=getattr(args, "target", "localhost") or "localhost")
+    creds  = Credentials(
+        user=getattr(args, "user", None),
+        password=getattr(args, "password", None),
+        nt_hash=getattr(args, "hash", None),
+        domain=getattr(args, "domain", None),
+    )
+
+    if sub == "shellcode":
+        from scripts.exploits.shellcode_run import Script
+    elif sub == "ms17010":
+        from scripts.exploits.ms17010 import Script
+    else:
+        console.print("[yellow]Módulos de exploit disponibles:[/yellow]")
+        console.print("  [bold]shellcode[/bold]  — ejecuta shellcode en memoria (mmap/VirtualAlloc)")
+        console.print("  [bold]ms17010[/bold]    — EternalBlue checker + exploit (CVE-2017-0144)")
+        console.print("\n[dim]Uso: lobera.py exploit <módulo> --help[/dim]")
+        return
+
+    script = Script(target=target, creds=creds)
+    script.run(args)
+
+
 def run_crack(args):
     """Dispatcher para el cracker offline (Rust binary)."""
     from core.target import Target
@@ -486,6 +515,34 @@ def build_parser():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
+    # ── exploit (C binaries) ─────────────────────────────────────────────────
+    exp_p = subs.add_parser("exploit", help="Módulos de explotación (shellcode runner, MS17-010…)")
+    exp_s = exp_p.add_subparsers(dest="exploit_module", metavar="módulo")
+
+    # shellcode
+    sc_p = exp_s.add_parser("shellcode", help="Ejecuta shellcode en memoria")
+    sc_p.add_argument("-f", "--shellcode-file", dest="shellcode_file", default=None,
+                      help="Fichero raw de shellcode (output de msfvenom -f raw)")
+    sc_p.add_argument("-h", "--shellcode-hex",  dest="shellcode_hex",  default=None,
+                      help="Shellcode como string hex (\\xfc\\x48...)")
+    sc_p.add_argument("--method", default="direct", choices=["direct","thread","fork"],
+                      help="Método de ejecución (default: direct)")
+    sc_p.add_argument("--xor",    dest="xor_key",  default=None,
+                      help="De-ofuscar XOR con byte KEY (ej: 0x41)")
+    sc_p.add_argument("--sleep",  dest="sleep_ms", default=None, type=int,
+                      help="Dormir N ms antes de ejecutar (bypass sandbox)")
+    sc_p.add_argument("--rwx-split", dest="rwx_split", action="store_true",
+                      help="Mapear RW primero, luego RX (evitar W+X simultánea)")
+
+    # ms17010
+    eb_p = exp_s.add_parser("ms17010", help="EternalBlue (CVE-2017-0144) checker/exploit")
+    eb_p.add_argument("-t", "--target",  required=True, help="IP del objetivo")
+    eb_p.add_argument("--port",          default=445, type=int, help="Puerto SMB (default: 445)")
+    eb_p.add_argument("--timeout",       default=3000, type=int, help="Timeout en ms (default: 3000)")
+    eb_p.add_argument("--exploit",       action="store_true", help="Explotar si vulnerable")
+    eb_p.add_argument("--lhost",         default=None, help="IP del atacante (para reverse shell)")
+    eb_p.add_argument("--lport",         default=4444, type=int, help="Puerto listener (default: 4444)")
+
     # ── crack (Rust binary) ──────────────────────────────────────────────────
     crack_p = subs.add_parser("crack", help="Crackeo offline de hashes Kerberos/NTLM (Rust, multi-core)")
     crack_p.add_argument("-f", "--format",   required=True,
@@ -606,6 +663,7 @@ def main():
         "https":    run_https,
         "ftp":      run_ftp,
         "mssql":    run_mssql,
+        "exploit":    run_exploit,
         "crack":      run_crack,
         "scan":       run_scan,
         "db":         run_db,
