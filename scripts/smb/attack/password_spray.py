@@ -2,6 +2,7 @@
 
 from scripts.base import BaseScript
 from modules.smb import SMBModule
+from core import spray_guard
 from core.output import console
 
 
@@ -22,10 +23,18 @@ class PasswordSprayScript(BaseScript):
          "desc": "Hash NT (o LM:NT) único a probar contra TODOS los usuarios (pass-the-hash spray). Excluyente con -p",
          "good": "smb --script=password-spray -t 10.129.1.5 --userlist users.txt -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c",
          "bad": "smb --script=password-spray -t 10.129.1.5 --userlist users.txt -p 'x' -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c  [-p y -H juntos: elige solo uno]"},
+        {"flag": "--delay / --jitter",
+         "desc": "Control de tasa: delay fijo + variación aleatoria entre intentos para evitar lockout",
+         "good": "smb --script=password-spray -t 10.129.1.5 --userlist users.txt -p 'Pass1' --delay 30 --jitter 5",
+         "bad": "smb --script=password-spray -t 10.129.1.5 --userlist users.txt -p 'Pass1'  [sin delay con threshold bajo → riesgo de bloqueo]"},
     ]
 
     def run(self, **kwargs):
-        userlist = kwargs.get("userlist")
+        userlist            = kwargs.get("userlist")
+        delay               = float(kwargs.get("delay") or 0.0)
+        jitter              = float(kwargs.get("jitter") or 0.0)
+        continue_on_lockout = bool(kwargs.get("continue_on_lockout", False))
+
         if not userlist:
             console.print("[red]Falta --userlist: password-spray necesita un fichero con usuarios.[/red]")
             return
@@ -36,6 +45,22 @@ class PasswordSprayScript(BaseScript):
         if not self.creds.hash and not self.creds.password:
             console.print("[red]Falta -p o -H: password-spray necesita una credencial que probar.[/red]")
             return
+
+        # ── Verificar política de lockout antes de empezar ────────────────────
+        policy = spray_guard.check_lockout_policy(self.target, self.creds)
+        if not spray_guard.warn_if_risky(policy, requested_delay=delay,
+                                          continue_on_lockout=continue_on_lockout):
+            return
+
+        # Si no se especificó delay, usar el recomendado automáticamente
+        if delay == 0.0:
+            rec = spray_guard.safe_delay(policy)
+            if rec > 0:
+                delay = rec
+                console.print(f"  [dim]delay automático aplicado: {delay:.0f}s[/dim]")
+            elif rec == -1:
+                if not continue_on_lockout:
+                    return   # warn_if_risky ya lo habrá abortado, pero por seguridad
 
         smb = SMBModule(self.target, self.creds)
         if not smb.connect():
@@ -52,6 +77,8 @@ class PasswordSprayScript(BaseScript):
             return
 
         if self.creds.hash:
-            smb.password_spray(users, nt_hash=self.creds.hash, domain=self.creds.domain)
+            smb.password_spray(users, nt_hash=self.creds.hash, domain=self.creds.domain,
+                               delay=delay, jitter=jitter, continue_on_lockout=continue_on_lockout)
         else:
-            smb.password_spray(users, password=self.creds.password, domain=self.creds.domain)
+            smb.password_spray(users, password=self.creds.password, domain=self.creds.domain,
+                               delay=delay, jitter=jitter, continue_on_lockout=continue_on_lockout)

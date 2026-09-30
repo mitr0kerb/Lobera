@@ -59,6 +59,24 @@ OPTIONAL = [
         "default": None,
         "hint":    "ruta al fichero — enter para omitir spray",
     },
+    {
+        "key":     "delay",
+        "label":   "Delay entre intentos de spray (segundos, 0 = automático)",
+        "default": None,
+        "hint":    "enter = automático según política de lockout",
+    },
+    {
+        "key":     "jitter",
+        "label":   "Jitter adicional al delay (variación aleatoria en segundos)",
+        "default": None,
+        "hint":    "enter = sin jitter",
+    },
+    {
+        "key":     "continue_on_lockout",
+        "label":   "Continuar aunque se detecte riesgo de lockout (true/false)",
+        "default": None,
+        "hint":    "enter = no (recomendado)",
+    },
 ]
 
 # Orden de ejecución de scripts y condición para lanzar cada uno.

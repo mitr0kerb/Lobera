@@ -137,6 +137,7 @@ _PARAM_TO_ARG = {
     "passlist":            "passlist",
     "wordlist":            "wordlist",
     "delay":               "delay",
+    "jitter":              "jitter",
     "share":               "share",
     "ext":                 "ext",
     "keywords":            "keywords",
@@ -223,7 +224,7 @@ def _cast_extra_kwargs(meta, args):
                  "max_depth", "max_pages", "http_port"):
             try: val = int(val)
             except (ValueError, TypeError): pass
-        if p == "delay":
+        if p in ("delay", "jitter"):
             try: val = float(val)
             except (ValueError, TypeError): pass
         if p in ("ldaps", "ssl", "enabled_only", "privileged_only",

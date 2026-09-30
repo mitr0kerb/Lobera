@@ -3,7 +3,7 @@
 import time
 from scripts.base import BaseScript
 from core.output import print_result, print_table, console
-from core import session_db
+from core import session_db, spray_guard
 
 try:
     from modules.winrm import WinRMModule
@@ -45,14 +45,29 @@ class Script(BaseScript):
         userlist_path = kwargs.get("userlist")
         password      = self.creds.password
         nt_hash       = self.creds.hash
-        delay         = float(kwargs.get("delay", 1))
-        use_ssl       = kwargs.get("ssl", False)
-        port          = kwargs.get("port")
+        delay               = float(kwargs.get("delay") or 0.0)
+        jitter              = float(kwargs.get("jitter") or 0.0)
+        continue_on_lockout = bool(kwargs.get("continue_on_lockout", False))
+        use_ssl             = kwargs.get("ssl", False)
+        port                = kwargs.get("port")
 
         if not userlist_path:
             console.print("[red]--userlist es obligatorio[/red]"); return []
         if not password and not nt_hash:
             console.print("[red]-p o -H es obligatorio[/red]"); return []
+
+        # ── Verificar política de lockout antes de empezar ────────────────────
+        policy = spray_guard.check_lockout_policy(self.target, self.creds)
+        if not spray_guard.warn_if_risky(policy, requested_delay=delay,
+                                          continue_on_lockout=continue_on_lockout):
+            return []
+        if delay == 0.0:
+            rec = spray_guard.safe_delay(policy)
+            if rec > 0:
+                delay = rec
+                console.print(f"  [dim]delay automático aplicado: {delay:.0f}s[/dim]")
+            elif rec == -1 and not continue_on_lockout:
+                return []
 
         try:
             with open(userlist_path, encoding="utf-8", errors="replace") as f:
@@ -103,8 +118,9 @@ class Script(BaseScript):
             except Exception:
                 pass  # Credencial inválida
 
-            if delay > 0 and i < len(users):
-                time.sleep(delay)
+            if i < len(users) and (delay or jitter):
+                import random
+                time.sleep(delay + random.uniform(0, jitter))
 
         if valid:
             print_table("Credenciales válidas", ["Usuario","Secreto"],
