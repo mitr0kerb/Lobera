@@ -1,9 +1,9 @@
 # scripts/smb/shell/interactive.py
 """
-SMB interactive shell with tab completion.
-Commands: shares, use, ls, cd, get, cat, put, pwd, exit
-Tab completes: commands and remote paths from the live server.
-get downloads to the current working directory (not loot/).
+Shell interactiva SMB con autocompletado por tabulador.
+Comandos: shares, use, ls, cd, get, cat, put, pwd, exit
+El tabulador completa: comandos y rutas remotas del servidor activo.
+get descarga al directorio de trabajo actual (no a loot/).
 """
 
 import os
@@ -105,11 +105,11 @@ class Script(BaseScript):
     name        = "interactive-shell"
     protocol    = "smb"
     category    = "shell"
-    description = "Interactive SMB shell: shares, ls, cd, get, put. Tab completes remote paths."
+    description = "Shell SMB interactiva: shares, ls, cd, get, put. Tabulador completa rutas remotas."
 
     def run(self, **kwargs):
         if not _IMPACKET_OK:
-            console.print("[red]impacket not installed. Run: pip install impacket[/red]")
+            console.print("[red]impacket no está instalado. Ejecuta: pip install impacket[/red]")
             return
 
         ip      = self.target.ip
@@ -126,11 +126,11 @@ class Script(BaseScript):
                 lm_hash, nt_hash = nt_hash.split(":", 1)
             conn.login(user, passwd, domain, lm_hash, nt_hash)
         except Exception as e:
-            console.print(f"[red]Connection failed: {e}[/red]")
+            console.print(f"[red]Conexión fallida: {e}[/red]")
             return
 
-        console.print(f"[bold {COLOR}]Connected to {ip} as {user or '(anonymous)'}[/bold {COLOR}]")
-        console.print("[dim]Type 'help' for commands. Press Tab to autocomplete remote paths.[/dim]\n")
+        console.print(f"[bold {COLOR}]Conectado a {ip} como {user or '(anónimo)'}[/bold {COLOR}]")
+        console.print("[dim]Escribe 'help' para ver los comandos. Tab para autocompletar rutas remotas.[/dim]\n")
         session_db.DB.SaveTarget(ip, "", domain)
 
         share    = None
@@ -151,17 +151,17 @@ class Script(BaseScript):
             t.add_column(style="bold green")
             t.add_column(style="dim")
             for cmd, desc in [
-                ("shares",       "List available shares"),
-                ("use <share>",  "Connect to a share"),
-                ("ls [path]",    "List directory contents"),
-                ("cd <path>",    "Change remote directory"),
-                ("cd ..",        "Go up one directory"),
-                ("pwd",          "Print current remote path"),
-                ("get <file>",   "Download file to current local directory"),
-                ("put <file>",   "Upload local file"),
-                ("cat <file>",   "Print file contents"),
-                ("clear",        "Clear screen"),
-                ("exit",         "Exit shell"),
+                ("shares",       "Lista los shares disponibles"),
+                ("use <share>",  "Conectar a un share"),
+                ("ls [path]",    "Listar contenido del directorio"),
+                ("cd <path>",    "Cambiar directorio remoto"),
+                ("cd ..",        "Subir un directorio"),
+                ("pwd",          "Mostrar ruta remota actual"),
+                ("get <file>",   "Descargar fichero al directorio local actual"),
+                ("put <file>",   "Subir fichero local"),
+                ("cat <file>",   "Mostrar contenido del fichero"),
+                ("clear",        "Limpiar pantalla"),
+                ("exit",         "Salir de la shell"),
             ]:
                 t.add_row(cmd, desc)
             console.print(t)
@@ -184,7 +184,7 @@ class Script(BaseScript):
 
         def do_ls(path=""):
             if not share:
-                console.print("[yellow]No share selected. Use: use <share>[/yellow]")
+                console.print("[yellow]No hay share seleccionado. Usa: use <share>[/yellow]")
                 return
             remote  = (cwd + "\\" + path).strip("\\") if path else cwd
             pattern = remote + "\\*" if remote else "*"
@@ -215,7 +215,7 @@ class Script(BaseScript):
         def do_cd(path):
             nonlocal cwd
             if not share:
-                console.print("[yellow]No share selected.[/yellow]")
+                console.print("[yellow]No hay share seleccionado.[/yellow]")
                 return
             if path == "..":
                 cwd = cwd.rsplit("\\", 1)[0] if "\\" in cwd else ""
@@ -231,7 +231,7 @@ class Script(BaseScript):
 
         def do_get(remote_name):
             if not share:
-                console.print("[yellow]No share selected.[/yellow]")
+                console.print("[yellow]No hay share seleccionado.[/yellow]")
                 return
             remote_path = (cwd + "\\" + remote_name).strip("\\") if cwd else remote_name
             local_path  = Path(os.getcwd()) / remote_name.split("\\")[-1].split("/")[-1]
@@ -252,24 +252,24 @@ class Script(BaseScript):
 
         def do_put(local_name):
             if not share:
-                console.print("[yellow]No share selected.[/yellow]")
+                console.print("[yellow]No hay share seleccionado.[/yellow]")
                 return
             local_path  = Path(local_name)
             if not local_path.exists():
-                console.print(f"[red]put: {local_name}: not found[/red]")
+                console.print(f"[red]put: {local_name}: no encontrado[/red]")
                 return
             remote_path = (cwd + "\\" + local_path.name).strip("\\") if cwd else local_path.name
             try:
                 with open(local_path, "rb") as fh:
                     conn.putFile(share, remote_path, fh.read)
-                console.print(f"[green]✓[/green] Uploaded [bold]{local_path.name}[/bold] → {remote_path}")
+                console.print(f"[green]✓[/green] Subido [bold]{local_path.name}[/bold] → {remote_path}")
                 completer.invalidate_cache(cwd)
             except Exception as e:
                 console.print(f"[red]put: {e}[/red]")
 
         def do_cat(remote_name):
             if not share:
-                console.print("[yellow]No share selected.[/yellow]")
+                console.print("[yellow]No hay share seleccionado.[/yellow]")
                 return
             remote_path = (cwd + "\\" + remote_name).strip("\\") if cwd else remote_name
             buf = []
@@ -284,7 +284,7 @@ class Script(BaseScript):
             try:
                 line = input(prompt()).strip()
             except (EOFError, KeyboardInterrupt):
-                console.print("\n[dim]Exiting SMB shell.[/dim]")
+                console.print("\n[dim]Saliendo de la shell SMB.[/dim]")
                 break
             if not line:
                 continue
@@ -295,7 +295,7 @@ class Script(BaseScript):
             if cmd == "dir":
                 cmd = "ls"
             if cmd in ("exit", "quit"):
-                console.print("[dim]Exiting SMB shell.[/dim]")
+                console.print("[dim]Saliendo de la shell SMB.[/dim]")
                 break
             elif cmd == "help":
                 print_help()
@@ -303,7 +303,7 @@ class Script(BaseScript):
                 list_shares()
             elif cmd == "use":
                 if not arg:
-                    console.print("[red]Usage: use <share>[/red]")
+                    console.print("[red]Uso: use <share>[/red]")
                 else:
                     try:
                         conn.listPath(arg, "*")
@@ -324,23 +324,23 @@ class Script(BaseScript):
                 console.print(f"  [cyan]{loc}[/cyan]")
             elif cmd == "get":
                 if not arg:
-                    console.print("[red]Usage: get <remote_file>[/red]")
+                    console.print("[red]Uso: get <fichero_remoto>[/red]")
                 else:
                     do_get(arg)
             elif cmd == "put":
                 if not arg:
-                    console.print("[red]Usage: put <local_file>[/red]")
+                    console.print("[red]Uso: put <fichero_local>[/red]")
                 else:
                     do_put(arg)
             elif cmd == "cat":
                 if not arg:
-                    console.print("[red]Usage: cat <remote_file>[/red]")
+                    console.print("[red]Uso: cat <fichero_remoto>[/red]")
                 else:
                     do_cat(arg)
             elif cmd == "clear":
                 os.system("clear")
             else:
-                console.print(f"[red]Unknown command: '{cmd}'[/red] — type [bold]help[/bold]")
+                console.print(f"[red]Comando desconocido: '{cmd}'[/red] — escribe [bold]help[/bold]")
 
         try:
             conn.logoff()

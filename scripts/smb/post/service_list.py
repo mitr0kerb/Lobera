@@ -1,6 +1,6 @@
 
 # scripts/smb/post/service_list.py
-"""List services on the remote host via SVCCTL pipe."""
+"""Lista servicios en el host remoto via pipe SVCCTL."""
 from core.output import console, print_result, print_table
 from core import session_db
 from scripts.base import BaseScript
@@ -20,11 +20,11 @@ class Script(BaseScript):
     name        = "service-list"
     protocol    = "smb"
     category    = "post"
-    description = "List Windows services on the remote host via SVCCTL pipe. Requires admin."
+    description = "Lista servicios Windows en el host remoto via pipe SVCCTL. Requiere admin."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip       = self.target.ip
         domain   = self.creds.domain   or ""
@@ -72,10 +72,10 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"SVCCTL error: {e}"); return None
 
         if services:
-            print_table(f"Services on {ip}", ["Name", "Display Name", "State"], services)
+            print_table(f"Servicios en {ip}", ["Nombre", "Nombre visible", "Estado"], services)
             running = sum(1 for s in services if s[2] == "RUNNING")
             print_result("SMB", ip, "ok",
-                         f"{len(services)} service(s) found ({running} running)")
+                         f"{len(services)} servicio(s) encontrado(s) ({running} en ejecución)")
         else:
-            print_result("SMB", ip, "info", "No services found (or access denied)")
+            print_result("SMB", ip, "info", "No se encontraron servicios (o acceso denegado)")
         return services

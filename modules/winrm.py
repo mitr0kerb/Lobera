@@ -12,7 +12,7 @@
 #   - Kerberos (ccache) — KRB5CCNAME en el entorno
 #
 # Dependencia principal: pywinrm  (pip install pywinrm --break-system-packages)
-# Fallback para Kerberos: impacket WinRM transport
+# Alternativa para Kerberos: transporte WinRM de impacket
 
 import os
 import ssl
@@ -113,7 +113,7 @@ class WinRMModule:
                 )
                 auth_type = "NTLM" if transport == "ntlm" else "Basic"
 
-            # Test rápido de conectividad (whoami)
+            # Prueba rápida de conectividad (whoami)
             resp = self._session.run_cmd("whoami")
             if resp.status_code == 0:
                 whoami = resp.std_out.decode(errors="replace").strip()
@@ -237,7 +237,7 @@ class WinRMModule:
                 return False
         except Exception as exc:
             print_result(self._proto, self.target.ip, "fail",
-                         "Upload error: {}".format(exc))
+                         "Error al subir: {}".format(exc))
             return False
 
     def download_file(self, remote_path, local_path):
@@ -268,11 +268,11 @@ class WinRMModule:
             return True
         except Exception as exc:
             print_result(self._proto, self.target.ip, "fail",
-                         "Download error: {}".format(exc))
+                         "Error al descargar: {}".format(exc))
             return False
 
     # ------------------------------------------------------------------
-    # Enumeración de alto nivel
+    # Enumeración
     # ------------------------------------------------------------------
 
     def get_sysinfo(self):

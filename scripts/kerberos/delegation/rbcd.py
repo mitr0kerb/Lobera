@@ -151,5 +151,5 @@ class RBCDScript(BaseScript):
             ldap = LDAPModule(Target(ip=kdc, domain=realm.lower()), self.creds)
             return ldap.write_rbcd(target_computer, attacker_sid)
         except (ImportError, Exception) as e:
-            console.print(f"[dim]LDAP write error: {e}[/dim]")
+            console.print(f"[dim]Error de escritura LDAP: {e}[/dim]")
             return False

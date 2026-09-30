@@ -1,6 +1,6 @@
 
 # scripts/smb/enum/loggedon.py
-"""Enumerate logged-on users via NetWkstaUserEnum (WKSSVC pipe)."""
+"""Enumera usuarios con sesión activa via NetWkstaUserEnum (pipe WKSSVC)."""
 from core.output import console, print_result, print_table
 from core import session_db
 from scripts.base import BaseScript
@@ -17,11 +17,11 @@ class Script(BaseScript):
     name        = "loggedon"
     protocol    = "smb"
     category    = "enum"
-    description = "Enumerate logged-on users via WKSSVC (NetWkstaUserEnum). Requires admin."
+    description = "Enumera usuarios con sesión activa via WKSSVC (NetWkstaUserEnum). Requiere admin."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -55,8 +55,8 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"WKSSVC error: {e}"); return None
 
         if users:
-            print_table(f"Logged-on users on {ip}", ["Username", "Domain", "Logon Server"], users)
-            print_result("SMB", ip, "ok", f"{len(users)} logged-on user(s)")
+            print_table(f"Usuarios con sesión en {ip}", ["Usuario", "Dominio", "Servidor"], users)
+            print_result("SMB", ip, "ok", f"{len(users)} usuario(s) con sesión activa")
         else:
-            print_result("SMB", ip, "info", "No logged-on users found (or access denied)")
+            print_result("SMB", ip, "info", "No se encontraron usuarios con sesión (o acceso denegado)")
         return users

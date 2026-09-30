@@ -6,8 +6,8 @@ SCRIPT_PARAMS = {
     # ── enum ──────────────────────────────────────────────────────────────────
     "domain-info": {
         "description": "Enumera información básica del dominio via SAMR/LSA (nombre, SID, DCs, política).",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "timeout"],
         "defaults": {"timeout": 5},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -20,8 +20,8 @@ SCRIPT_PARAMS = {
     },
     "users": {
         "description": "Enumera usuarios del dominio via SAMR.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "timeout"],
         "defaults": {"timeout": 5},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -34,8 +34,8 @@ SCRIPT_PARAMS = {
     },
     "groups": {
         "description": "Enumera grupos del dominio via SAMR. Con local_admins muestra el grupo Administrators local.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "local_admins", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "local_admins", "timeout"],
         "defaults": {"timeout": 5, "local_admins": False},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -49,8 +49,8 @@ SCRIPT_PARAMS = {
     },
     "sessions": {
         "description": "Enumera sesiones activas en el objetivo via SRVSVC. Con open_files muestra ficheros abiertos.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "open_files", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "open_files", "timeout"],
         "defaults": {"timeout": 5, "open_files": False},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -63,8 +63,8 @@ SCRIPT_PARAMS = {
     },
     "privileges": {
         "description": "Enumera privilegios de cuentas via LSARPC. Detecta privilegios peligrosos (SeImpersonate, etc.).",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "priv", "interesting_only", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "priv", "interesting_only", "timeout"],
         "defaults": {"timeout": 5, "interesting_only": False},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -78,8 +78,8 @@ SCRIPT_PARAMS = {
     },
     "services": {
         "description": "Enumera servicios de Windows via SCM. Filtra por estado o servicios interesantes.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "running_only", "interesting_only", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "running_only", "interesting_only", "timeout"],
         "defaults": {"timeout": 5, "running_only": False, "interesting_only": False},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -94,7 +94,7 @@ SCRIPT_PARAMS = {
     "registry": {
         "description": "Lee claves del registro remoto via WINREG. Especifica hive, key y value.",
         "required": ["target", "user", "key"],
-        "optional": ["password", "hash", "domain", "hive", "value", "timeout"],
+        "optional": ["user", "password", "hash", "domain", "hive", "value", "timeout"],
         "defaults": {"timeout": 5, "hive": "HKLM"},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -112,7 +112,7 @@ SCRIPT_PARAMS = {
     "exec-service": {
         "description": "Ejecuta un comando remoto creando un servicio temporal via SCM (requiere admin).",
         "required": ["target", "user", "command"],
-        "optional": ["password", "hash", "domain", "svc_name", "wait", "timeout"],
+        "optional": ["user", "password", "hash", "domain", "svc_name", "wait", "timeout"],
         "defaults": {"timeout": 5, "svc_name": "LobSvc", "wait": 3},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -140,8 +140,8 @@ SCRIPT_PARAMS = {
     # ── exploits ──────────────────────────────────────────────────────────────
     "printnightmare": {
         "description": "CVE-2021-1675/34527: comprueba si Spooler está activo y opcionalmente explota.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "action", "dll_path", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "action", "dll_path", "timeout"],
         "defaults": {"timeout": 5, "action": "check"},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -156,7 +156,7 @@ SCRIPT_PARAMS = {
     "petitpotam": {
         "description": "CVE-2021-36942: fuerza autenticación NTLM del DC hacia un listener (NTLM relay).",
         "required": ["target", "user", "listener"],
-        "optional": ["password", "hash", "domain", "action", "pipe", "timeout"],
+        "optional": ["user", "password", "hash", "domain", "action", "pipe", "timeout"],
         "defaults": {"timeout": 5, "action": "check", "pipe": "lsarpc"},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],
@@ -171,8 +171,8 @@ SCRIPT_PARAMS = {
     },
     "sam-dump": {
         "description": "Extrae hashes SAM/LSA/DPAPI via DCSync o volcado remoto del registro (requiere DA).",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "out_dir", "timeout"],
+        "required": ["target"],
+        "optional": ["user", "password", "hash", "domain", "out_dir", "timeout"],
         "defaults": {"timeout": 5, "out_dir": "."},
         "mutually_exclusive": [["password", "hash"]],
         "at_least_one": [["password", "hash"]],

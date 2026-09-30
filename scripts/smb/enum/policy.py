@@ -1,6 +1,6 @@
 
 # scripts/smb/enum/policy.py
-"""Enumerate password policy via SAMR pipe (no LDAP needed)."""
+"""Enumera la política de contraseñas via pipe SAMR (sin necesidad de LDAP)."""
 from core.output import console, print_result
 from core import session_db
 from scripts.base import BaseScript
@@ -20,11 +20,11 @@ class Script(BaseScript):
     name        = "policy"
     protocol    = "smb"
     category    = "enum"
-    description = "Enumerate domain password and lockout policy via SAMR pipe (no LDAP needed)."
+    description = "Enumera la política de contraseñas y bloqueo del dominio via pipe SAMR (sin LDAP)."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -57,8 +57,8 @@ class Script(BaseScript):
             min_len   = str(pol["MinPasswordLength"])
             pass_hist = str(pol["PasswordHistoryLength"])
             props     = int(pol["PasswordProperties"])
-            complexity  = "Enabled"  if props & 0x1  else "Disabled"
-            reversible  = "Yes"      if props & 0x10 else "No"
+            complexity  = "Activada"     if props & 0x1  else "Desactivada"
+            reversible  = "Sí"          if props & 0x10 else "No"
 
             def _days(val_struct):
                 low  = int(val_struct["LowPart"])
@@ -87,19 +87,19 @@ class Script(BaseScript):
         t.add_column(style="bold")
         rows = [
             ("Domain",               str(domain_name)),
-            ("Min Password Length",  min_len),
-            ("Password History",     f"{pass_hist} remembered"),
-            ("Max Password Age",     f"{max_age_days} days" if max_age_days else "Never expires"),
-            ("Min Password Age",     f"{min_age_days} days" if min_age_days else "No minimum"),
-            ("Complexity",           complexity),
-            ("Reversible Encryption",reversible),
-            ("Lockout Threshold",    f"{lockout_threshold} failed attempts"),
-            ("Lockout Duration",     f"{lockout_dur_mins} minutes"),
+            ("Longitud mínima",       min_len),
+            ("Historial de contraseñas", f"{pass_hist} recordadas"),
+            ("Edad máxima",            f"{max_age_days} días" if max_age_days else "Sin expiración"),
+            ("Edad mínima",            f"{min_age_days} días" if min_age_days else "Sin mínimo"),
+            ("Complejidad",           complexity),
+            ("Cifrado reversible",    reversible),
+            ("Umbral de bloqueo",     f"{lockout_threshold} intentos fallidos"),
+            ("Duración del bloqueo",  f"{lockout_dur_mins} minutos"),
         ]
         for label, val in rows:
             t.add_row(label, val)
 
-        console.print(Panel(t, title=f"[bold green]Password Policy — {ip}[/bold green]",
+        console.print(Panel(t, title=f"[bold green]Política de contraseñas — {ip}[/bold green]",
                             border_style="green", expand=False, padding=(1,2)))
         session_db.DB.SaveFinding(ip, "SMB", "password_policy",
                                    f"min_len={min_len} complexity={complexity} "

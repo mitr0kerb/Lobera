@@ -1,101 +1,73 @@
-# scripts/winrm/shell_params.py
+# scripts/winrm/scan_params.py
+
+# Parámetros requeridos y opcionales para el WinRM scanner.
+# El scanner lee este fichero para saber qué preguntar al usuario
+# y en qué orden ejecutar los scripts.
 
 EXPORT_FORMATS = ["json", "html", "xml", "yaml"]
 
-SCRIPT_PARAMS = {
-    # ── enum ──────────────────────────────────────────────────────────────────
-    "check": {
-        "description": "Comprueba si WinRM está activo y accesible en el objetivo.",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "ssl", "port", "timeout"],
-        "defaults": {"timeout": 5, "ssl": False},
-        "mutually_exclusive": [["password", "hash"]],
-        "at_least_one": [["password", "hash"]],
-        "example": [
-            "set target 10.10.10.5",
-            "set user administrator",
-            "set password Pass123!",
-            "run",
-        ],
-    },
-    "sysinfo": {
-        "description": "Obtiene información del sistema via WinRM (OS, hostname, dominio, usuarios, procesos).",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "ssl", "port", "timeout"],
-        "defaults": {"timeout": 5, "ssl": False},
-        "mutually_exclusive": [["password", "hash"]],
-        "at_least_one": [["password", "hash"]],
-        "example": [
-            "set target 10.10.10.5",
-            "set user administrator",
-            "set password Pass123!",
-            "run",
-        ],
-    },
-    # ── attack ────────────────────────────────────────────────────────────────
-    "password-spray": {
-        "description": "Password spray via WinRM contra una lista de usuarios.",
-        "required": ["target", "userlist"],
-        "optional": ["password", "hash", "domain", "ssl", "port", "delay", "timeout"],
-        "defaults": {"timeout": 5, "ssl": False, "delay": 1},
-        "mutually_exclusive": [["password", "hash"]],
-        "at_least_one": [["password", "hash"]],
-        "example": [
-            "set target 10.10.10.5",
-            "set userlist /ruta/users.txt",
-            "set password Summer2024!",
-            "run",
-        ],
-    },
-    # ── exploits ──────────────────────────────────────────────────────────────
-    "privesc-check": {
-        "description": "Enumera vectores de escalada de privilegios via WinRM (servicios, tokens, permisos).",
-        "required": ["target", "user"],
-        "optional": ["password", "hash", "domain", "ssl", "port", "timeout"],
-        "defaults": {"timeout": 5, "ssl": False},
-        "mutually_exclusive": [["password", "hash"]],
-        "at_least_one": [["password", "hash"]],
-        "example": [
-            "set target 10.10.10.5",
-            "set user administrator",
-            "set password Pass123!",
-            "run",
-        ],
-    },
-    "evil-winrm-payload": {
-        "description": "Genera y lanza payloads via WinRM: reverse shell, descarga de scripts PS, bypass AMSI.",
-        "required": ["target", "user", "action"],
-        "optional": ["password", "hash", "domain", "ssl", "port",
-                     "listener", "lport", "url", "out_dir", "timeout"],
-        "defaults": {"timeout": 5, "ssl": False, "lport": 4444, "out_dir": "."},
-        "mutually_exclusive": [["password", "hash"]],
-        "at_least_one": [["password", "hash"]],
-        "example": [
-            "set target 10.10.10.5",
-            "set user administrator",
-            "set password Pass123!",
-            "set action reverse-shell",
-            "set listener 10.10.14.5",
-            "set lport 4444",
-            "run",
-        ],
-    },
-}
+# required=True  → se pide en bucle hasta que se da un valor
+# required=False → enter omite (usa default)
+# secret=True    → se oculta al escribir (getpass)
 
-PARAM_LABELS = {
-    "target":   "IP/hostname del objetivo",
-    "user":     "Usuario",
-    "password": "Contraseña",
-    "hash":     "Hash NT (formato NT o LM:NT)",
-    "domain":   "Dominio FQDN",
-    "timeout":  "Timeout de conexión (segundos)",
-    "ssl":      "Usar HTTPS/SSL (True/False)",
-    "port":     "Puerto WinRM (default: 5985 / 5986 con SSL)",
-    "userlist": "Ruta al fichero de usuarios",
-    "delay":    "Delay entre intentos de spray (segundos)",
-    "action":   "Acción del payload (reverse-shell/download-script/bypass-amsi)",
-    "listener": "IP del listener para reverse shell",
-    "lport":    "Puerto del listener",
-    "url":      "URL del script PS a descargar",
-    "out_dir":  "Directorio de salida para artefactos",
-}
+REQUIRED = [
+    {
+        "key":      "target",
+        "label":    "IP/hostname del objetivo",
+        "required": True,
+        "secret":   False,
+        "default":  None,
+    },
+    {
+        "key":      "user",
+        "label":    "Usuario",
+        "required": True,
+        "secret":   False,
+        "default":  None,
+    },
+    {
+        "key":      "password",
+        "label":    "Contraseña",
+        "required": False,
+        "secret":   True,
+        "default":  "",
+        "hint":     "enter = vacío",
+    },
+    {
+        "key":      "hash",
+        "label":    "Hash NT (formato NT o LM:NT)",
+        "required": False,
+        "secret":   True,
+        "default":  None,
+        "hint":     "enter = omitir",
+    },
+    {
+        "key":      "domain",
+        "label":    "Dominio FQDN",
+        "required": False,
+        "secret":   False,
+        "default":  "",
+        "hint":     "enter = omitir",
+    },
+]
+
+OPTIONAL = [
+    {
+        "key":     "userlist",
+        "label":   "Wordlist de usuarios para password spray",
+        "default": None,
+        "hint":    "ruta al fichero — enter para omitir spray",
+    },
+]
+
+# Orden de ejecución de scripts y condición para lanzar cada uno.
+# condition=None           → siempre se ejecuta
+# condition="has_auth"     → solo si hay user+pass o hash
+# condition="has_userlist" → solo si se proporcionó wordlist válida
+
+SCAN_ORDER = [
+    {"script": "check",           "condition": None},
+    {"script": "sysinfo",         "condition": "has_auth"},
+    {"script": "privesc-check",   "condition": "has_auth"},
+    {"script": "password-spray",  "condition": "has_userlist"},
+]

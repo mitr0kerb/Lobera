@@ -88,7 +88,7 @@ class Script(BaseScript):
         rows = [("Algoritmo", header.get("alg","?")), ("kid", str(header.get("kid","—"))),
                 ("sub", str(payload.get("sub","—"))), ("admin", str(payload.get("admin","—"))),
                 ("role", str(payload.get("role","—")))]
-        print_table(f"JWT Info — {ip}:{port}", ["Campo", "Valor"], rows)
+        print_table(f"Análisis JWT — {ip}:{port}", ["Campo", "Valor"], rows)
 
         findings = []
 

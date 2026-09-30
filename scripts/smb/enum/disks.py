@@ -1,6 +1,6 @@
 
 # scripts/smb/enum/disks.py
-"""Enumerate disk drives on the remote server via SRVSVC."""
+"""Enumera unidades de disco del servidor remoto via SRVSVC."""
 from core.output import console, print_result, print_table
 from core import session_db
 from scripts.base import BaseScript
@@ -17,11 +17,11 @@ class Script(BaseScript):
     name        = "disks"
     protocol    = "smb"
     category    = "enum"
-    description = "Enumerate disk drives on the remote server via SRVSVC (NetrServerDiskEnum)."
+    description = "Enumera unidades de disco del servidor remoto via SRVSVC (NetrServerDiskEnum)."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -51,8 +51,8 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"SRVSVC error: {e}"); return None
 
         if disks:
-            print_table(f"Disks on {ip}", ["Drive"], disks)
-            print_result("SMB", ip, "ok", f"{len(disks)} disk(s) found")
+            print_table(f"Discos en {ip}", ["Unidad"], disks)
+            print_result("SMB", ip, "ok", f"{len(disks)} disco(s) encontrado(s)")
         else:
-            print_result("SMB", ip, "info", "No disks enumerated (or access denied)")
+            print_result("SMB", ip, "info", "No se enumeraron discos (o acceso denegado)")
         return disks

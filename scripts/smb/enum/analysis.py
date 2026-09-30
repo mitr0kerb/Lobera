@@ -1,10 +1,10 @@
 # scripts/smb/enum/analysis.py
 """
-SMB host analysis — full recon from a single IP.
-No credentials required for base info.
-Null session used automatically if available for extra data.
+Análisis completo del host SMB desde una sola IP.
+No se necesitan credenciales para la información base.
+Se usa null session automáticamente si está disponible para obtener datos extra.
 
-Reports: hostname, OS, domain, DC flag, SMB dialect, signing,
+Reporta: hostname, OS, dominio, flag DC, dialecto SMB, signing,
          null session, EternalBlue (MS17-010), SMBGhost (CVE-2020-0796).
 """
 
@@ -33,7 +33,7 @@ except ImportError:
     _IMPACKET_OK = False
  
  
-# ── Dialect helper ────────────────────────────────────────────────────────────
+# ── Helper de dialecto ────────────────────────────────────────────────────────
  
 _DIALECT_MAP = {
     0x0001: "SMBv1",
@@ -55,13 +55,13 @@ def _dialect_str(raw):
     return _DIALECT_MAP.get(d, f"Unknown (0x{d:04x})")
  
  
-# ── Info extraction ───────────────────────────────────────────────────────────
+# ── Extracción de información ─────────────────────────────────────────────────
  
 def _get_info(ip, timeout, dialect=None):
     """
-    Connect with the given dialect, do anonymous login to trigger
-    NTLM challenge processing, then read all server info fields.
-    Returns dict or None on failure.
+    Conecta con el dialecto indicado, hace login anónimo para disparar
+    el procesamiento del NTLM challenge y lee todos los campos del servidor.
+    Devuelve un dict o None si falla.
     """
     try:
         if dialect is not None:
@@ -69,12 +69,12 @@ def _get_info(ip, timeout, dialect=None):
         else:
             conn = SMBConnection(ip, ip, timeout=timeout)
  
-        # Anonymous login — this triggers NTLM challenge on SMBv2/3
-        # which populates ServerOS from the Version field
+        # Login anónimo — dispara el NTLM challenge en SMBv2/3
+        # que rellena ServerOS desde el campo Version
         try:
             conn.login("", "", "")
         except Exception:
-            pass  # Login may fail (null session denied) but OS is already populated
+            pass  # El login puede fallar (null session denegada) pero el OS ya está relleno
  
         info = {
             "hostname":   conn.getServerName()          or "",
@@ -85,13 +85,13 @@ def _get_info(ip, timeout, dialect=None):
             "dialect_raw": conn.getDialect(),
         }
  
-        # Try dns host name too
+        # También se intenta el nombre DNS del host
         try:
             info["dns_host"] = conn.getServerDNSHostName() or ""
         except Exception:
             pass
  
-        # OS build fallback
+        # Fallback para build de OS
         if not info["os"]:
             try:
                 major = conn.getServerOSMajor()
@@ -102,7 +102,7 @@ def _get_info(ip, timeout, dialect=None):
             except Exception:
                 pass
  
-        # Signing
+        # Signing (firma SMB)
         try:
             sec = conn._SMBConnection._Connection.get("ServerSecurityMode", None)
             if sec is not None:
@@ -125,7 +125,7 @@ def _get_info(ip, timeout, dialect=None):
         return None
  
  
-# ── EternalBlue probe ─────────────────────────────────────────────────────────
+# ── Sonda EternalBlue ────────────────────────────────────────────────────────
  
 def _raw_connect(ip, payload, timeout=5):
     try:
@@ -142,11 +142,11 @@ def _raw_connect(ip, payload, timeout=5):
  
 def _check_eternalblue(ip, timeout=5):
     """
-    MS17-010 probe.
-    Sends SMBv1 Negotiate → anonymous SessionSetup → TreeConnect IPC$ → Trans2.
+    Sonda MS17-010.
+    Envía SMBv1 Negotiate → SessionSetup anónimo → TreeConnect IPC$ → Trans2.
     STATUS_INSUFF_SERVER_RESOURCES (0xC0000205) = vulnerable.
     """
-    # Step 1: SMBv1 Negotiate
+    # Paso 1: SMBv1 Negotiate
     neg = (
         b"\x00\x00\x00\x54"
         + b"\xff\x53\x4d\x42\x72"
@@ -162,9 +162,9 @@ def _check_eternalblue(ip, timeout=5):
     if not r1 or len(r1) < 36:
         return False
     if r1[8] != 0x72 or struct.unpack_from("<I", r1, 9)[0] != 0:
-        return False  # Server rejected SMBv1 negotiate → not vulnerable
+        return False  # El servidor rechazó el Negotiate SMBv1 → no vulnerable
  
-    # Step 2: Anonymous SessionSetup
+    # Paso 2: SessionSetup anónimo
     uid = struct.unpack_from("<H", r1, 28)[0] if len(r1) > 29 else 0
     setup = (
         b"\x00\x00\x00\x63"
@@ -190,7 +190,7 @@ def _check_eternalblue(ip, timeout=5):
         return None
     uid2 = struct.unpack_from("<H", r2, 28)[0] if len(r2) > 29 else uid
  
-    # Step 3: TreeConnect to IPC$
+    # Paso 3: TreeConnect a IPC$
     ipc = b"\\\\" + ip.encode() + b"\\IPC$\x00"
     padding = b"\x00" * ((4 - len(ipc) % 4) % 4)
     tree = (
@@ -218,7 +218,7 @@ def _check_eternalblue(ip, timeout=5):
         return None
     tid = struct.unpack_from("<H", r3, 24)[0] if len(r3) > 25 else 0
  
-    # Step 4: Trans2 with special FEA list — triggers pool grooming
+    # Paso 4: Trans2 con FEA list especial — dispara pool grooming
     trans2 = (
         b"\x00\x00\x00\x9f"
         + b"\xff\x53\x4d\x42\x32"
@@ -247,7 +247,7 @@ def _check_eternalblue(ip, timeout=5):
  
  
 def _check_smbghost(ip, timeout=5):
-    """CVE-2020-0796: SMBv3.1.1 compression context detection."""
+    """CVE-2020-0796: detección de contexto de compresión SMBv3.1.1."""
     payload = (
         b"\x00\x00\x00\xc0"
         + b"\xfeSMB"
@@ -269,26 +269,26 @@ def _check_smbghost(ip, timeout=5):
     return False
  
  
-# ── Script ────────────────────────────────────────────────────────────────────
+# ── Script ───────────────────────────────────────────────────────────────────
  
 class Script(BaseScript):
     name        = "analysis"
     protocol    = "smb"
     category    = "enum"
     description = (
-        "Full SMB host recon: OS, hostname, domain, DC, dialect, signing, SMBv1, "
+        "Reconocimiento completo del host SMB: OS, hostname, dominio, DC, dialecto, signing, SMBv1, "
         "null session, EternalBlue (MS17-010), SMBGhost (CVE-2020-0796)."
     )
  
     def run(self, **kwargs):
         if not _IMPACKET_OK:
-            console.print("[red]impacket not installed.[/red]")
+            console.print("[red]impacket no está instalado.[/red]")
             return None
  
         ip      = self.target.ip
         timeout = self.target.timeout or 5
  
-        console.print(f"\n[dim][analysis] Probing {ip}...[/dim]")
+        console.print(f"\n[dim][analysis] Sondeando {ip}...[/dim]")
  
         r = {
             "hostname":    "—",
@@ -304,8 +304,8 @@ class Script(BaseScript):
             "smbghost":    None,
         }
  
-        # ── Step 1: try SMBv1 with login → richest OS info ────────────────────
-        console.print("[dim][analysis] Trying SMBv1 (with anonymous login)...[/dim]")
+        # ── Paso 1: intento SMBv1 con login → mayor info de OS ─────────────────────
+        console.print("[dim][analysis] Intentando SMBv1 (con login anónimo)...[/dim]")
         info1 = _get_info(ip, timeout, dialect=SMB_DIALECT)
         if info1:
             r["smbv1"] = True
@@ -315,57 +315,57 @@ class Script(BaseScript):
                 if val and val != "":
                     r[key] = val
  
-        # ── Step 2: SMBv2/3 with login → fills OS from NTLM Version field ─────
-        console.print("[dim][analysis] Connecting via SMBv2/3 (with anonymous login)...[/dim]")
+        # ── Paso 2: SMBv2/3 con login → rellena OS desde campo Version de NTLM ─────
+        console.print("[dim][analysis] Conectando vía SMBv2/3 (con login anónimo)...[/dim]")
         info3 = _get_info(ip, timeout, dialect=None)
         if info3:
-            # Fill gaps — prefer non-empty values
+            # Rellenar huecos — preferir valores no vacíos
             for key in ("hostname", "os", "domain", "dns_domain"):
                 if (r[key] == "—" or r[key] == "") and info3.get(key):
                     r[key] = info3[key]
  
-            # Dialect from v3 connection (keep SMBv1 if that was set)
+            # Dialecto desde conexión v3 (mantener SMBv1 si ya se estableció)
             d_str = _dialect_str(info3.get("dialect_raw", 0))
             if r["dialect"] == "—":
                 r["dialect"] = d_str
             elif r["smbv1"] and d_str not in ("SMBv1", "Unknown (0x0001)"):
                 r["dialect"] = f"SMBv1 + {d_str}"
  
-            # Signing from v3 if not yet set
+            # Signing desde v3 si aún no se estableció
             if r["signing"] is None:
                 r["signing"] = info3.get("signing")
  
         elif info1 is None:
-            console.print(f"[red]Cannot connect to {ip}:445[/red]")
+            console.print(f"[red]No se puede conectar a {ip}:445[/red]")
             return None
  
-        # ── Step 3: DC detection ──────────────────────────────────────────────
+        # ── Paso 3: detección de DC ─────────────────────────────────────────────────
         dns = r["dns_domain"]
         if dns and dns != "—" and "." in dns:
             r["is_dc"] = True
  
-        # ── Step 4: null session ──────────────────────────────────────────────
-        console.print("[dim][analysis] Testing null session...[/dim]")
+        # ── Paso 4: null session ────────────────────────────────────────────────────
+        console.print("[dim][analysis] Comprobando null session...[/dim]")
         try:
             cn = SMBConnection(ip, ip, timeout=timeout)
             cn.login("", "", "")
-            # If login raised no exception, null session is allowed
+            # Si el login no lanzó excepción, null session está permitida
             r["null_sess"] = True
             try: cn.logoff()
             except Exception: pass
         except Exception as e:
             err = str(e).lower()
-            # Some servers allow the session but return STATUS_ACCESS_DENIED later
+            # Algunos servidores permiten la sesión pero devuelven STATUS_ACCESS_DENIED después
             r["null_sess"] = "logon_failure" not in err and "access_denied" not in err
  
-        # ── Step 5: vulnerability probes ──────────────────────────────────────
-        console.print("[dim][analysis] Checking EternalBlue (MS17-010)...[/dim]")
+        # ── Paso 5: sondas de vulnerabilidades ──────────────────────────────────────
+        console.print("[dim][analysis] Comprobando EternalBlue (MS17-010)...[/dim]")
         r["eternalblue"] = _check_eternalblue(ip, timeout)
  
-        console.print("[dim][analysis] Checking SMBGhost (CVE-2020-0796)...[/dim]")
+        console.print("[dim][analysis] Comprobando SMBGhost (CVE-2020-0796)...[/dim]")
         r["smbghost"]    = _check_smbghost(ip, timeout)
  
-        # ── Step 6: save to DB ────────────────────────────────────────────────
+        # ── Paso 6: guardar en DB ───────────────────────────────────────────────────
         hn  = r["hostname"]   if r["hostname"]   not in ("—", "") else ""
         dom = r["domain"]     if r["domain"]     not in ("—", "") else ""
         session_db.DB.SaveTarget(ip, hn, dom)
@@ -390,9 +390,9 @@ class Script(BaseScript):
  
 def _render(ip, r):
  
-    def _bool(val, good_if_true=True, yes="Yes", no="No"):
+    def _bool(val, good_if_true=True, yes="Sí", no="No"):
         if val is None:
-            return "[dim]Unknown[/dim]"
+            return "[dim]Desconocido[/dim]"
         good  = (val and good_if_true) or (not val and not good_if_true)
         color = "green" if good else "red"
         mark  = "✓" if good else "✗"
@@ -408,20 +408,20 @@ def _render(ip, r):
     host.add_row("Is DC",       _bool(r["is_dc"]))
     host.add_row("SMB Dialect", f"[cyan]{r['dialect']}[/cyan]")
     host.add_row("SMBv1",       _bool(r["smbv1"], good_if_true=False,
-                                      yes="Enabled ✗", no="Disabled ✓"))
+                                      yes="Activado ✗", no="Desactivado ✓"))
  
     sec = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
     sec.add_column(style="dim", width=18)
     sec.add_column()
     signing_str = (
-        "[dim]Unknown[/dim]" if r["signing"] is None
-        else "[green]Required ✓[/green]" if r["signing"]
-        else "[bold red]Not required ✗  (NTLM relay possible)[/bold red]"
+        "[dim]Desconocido[/dim]" if r["signing"] is None
+        else "[green]Obligatorio ✓[/green]" if r["signing"]
+        else "[bold red]No obligatorio ✗  (NTLM relay posible)[/bold red]"
     )
     null_str = (
-        "[dim]Unknown[/dim]"         if r["null_sess"] is None
-        else "[bold red]Allowed ✗[/bold red]" if r["null_sess"]
-        else "[green]Denied ✓[/green]"
+        "[dim]Desconocido[/dim]"         if r["null_sess"] is None
+        else "[bold red]Permitida ✗[/bold red]" if r["null_sess"]
+        else "[green]Denegada ✓[/green]"
     )
     sec.add_row("SMB Signing",  signing_str)
     sec.add_row("Null Session", null_str)
@@ -442,16 +442,16 @@ def _render(ip, r):
  
     console.print(Panel(
         Group(
-            Text("HOST INFORMATION", style="bold green"),
+            Text("INFORMACIÓN DEL HOST", style="bold green"),
             host,
             Text(""),
-            Text("SECURITY", style="bold green"),
+            Text("SEGURIDAD", style="bold green"),
             sec,
             Text(""),
-            Text("VULNERABILITIES", style="bold green"),
+            Text("VULNERABILIDADES", style="bold green"),
             vuln,
         ),
-        title=f"[bold green]  SMB Analysis — {ip}  [/bold green]",
+        title=f"[bold green]  Análisis SMB — {ip}  [/bold green]",
         border_style="green",
         expand=False,
         padding=(1, 3),

@@ -1,8 +1,8 @@
 # scripts/smb/enum/auth.py
 """
-SMB authentication test.
-Tries to authenticate with the given credentials and reports
-whether they are valid. Supports password, NT hash and null session.
+Prueba de autenticación SMB.
+Intenta autenticarse con las credenciales dadas e informa
+si son válidas. Soporta contraseña, NT hash y null session.
 """
 
 from core.output import console, print_result
@@ -20,11 +20,11 @@ class Script(BaseScript):
     name        = "auth"
     protocol    = "smb"
     category    = "enum"
-    description = "Test SMB credentials (password, hash or null session) and report result."
+    description = "Prueba credenciales SMB (contraseña, hash o null session) e informa el resultado."
 
     def run(self, **kwargs):
         if not _IMPACKET_OK:
-            console.print("[red]impacket not installed.[/red]")
+            console.print("[red]impacket no está instalado.[/red]")
             return False
 
         ip      = self.target.ip
@@ -55,10 +55,10 @@ class Script(BaseScript):
                 0x0300: "SMBv3.0", 0x0302: "SMBv3.0.2", 0x0311: "SMBv3.1.1",
             }.get(conn.getDialect(), "SMBv1")
         except SessionError as e:
-            print_result("SMB", ip, "fail", f"Authentication failed — {e}")
+            print_result("SMB", ip, "fail", f"Autenticación fallida — {e}")
             return False
         except Exception as e:
-            print_result("SMB", ip, "fail", f"Connection error — {e}")
+            print_result("SMB", ip, "fail", f"Error de conexión — {e}")
             return False
 
         from rich.panel import Panel
@@ -66,7 +66,7 @@ class Script(BaseScript):
         from rich import box
 
         if not user:
-            print_result("SMB", ip, "ok", "Null session allowed")
+            print_result("SMB", ip, "ok", "Null session permitida")
             session_db.DB.SaveFinding(ip, "SMB", "null_session", "null session allowed")
             conn.logoff()
             return True
@@ -77,23 +77,24 @@ class Script(BaseScript):
 
         t.add_row("User",    user)
         t.add_row("Domain",  domain or "(none)")
-        t.add_row("Auth",    "Hash (PTH)" if self.creds.hash else "Password")
-        t.add_row("Dialect", dialect)
+        tmethod = "Hash (PTH)" if self.creds.hash else "Contraseña"
+        t.add_row("Autenticación", tmethod)
+        t.add_row("Dialecto", dialect)
 
         server_name = "—"
         try:
             server_name = conn.getServerName()   or "—"
             server_os   = conn.getServerOS()     or "—"
             server_dom  = conn.getServerDomain() or "—"
-            t.add_row("Hostname",      server_name)
-            t.add_row("Server OS",     server_os)
-            t.add_row("Server Domain", server_dom)
+            t.add_row("Hostname",        server_name)
+            t.add_row("OS del servidor",  server_os)
+            t.add_row("Dominio servidor", server_dom)
         except Exception:
             pass
 
         console.print(Panel(
             t,
-            title=f"[bold green]✓  Authentication successful — {ip}[/bold green]",
+            title=f"[bold green]✓  Autenticación correcta — {ip}[/bold green]",
             border_style="green",
             expand=False,
         ))

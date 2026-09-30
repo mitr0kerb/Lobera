@@ -112,13 +112,13 @@ class WinRMShell:
     def _upload(self, rest):
         parts = rest.split(None, 1)
         if len(parts) < 2:
-            console.print("[red]Uso: upload <local_path> <remote_path>[/red]"); return
+            console.print("[red]Uso: upload <ruta_local> <ruta_remota>[/red]"); return
         self.winrm.upload_file(parts[0], parts[1])
 
     def _download(self, rest):
         parts = rest.split(None, 1)
         if len(parts) < 2:
-            console.print("[red]Uso: download <remote_path> <local_path>[/red]"); return
+            console.print("[red]Uso: download <ruta_remota> <ruta_local>[/red]"); return
         self.winrm.download_file(parts[0], parts[1])
 
     def _sysinfo(self):

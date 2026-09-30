@@ -94,7 +94,7 @@ class Script(BaseScript):
                 ("kid",       str(header.get("kid","—"))),
                 ("sub",       str(payload.get("sub","—"))),
                 ("admin",     str(payload.get("admin","—")))]
-        print_table(f"JWT Info HTTPS — {ip}:{port}", ["Campo","Valor"], rows)
+        print_table(f"Análisis JWT HTTPS — {ip}:{port}", ["Campo","Valor"], rows)
 
         findings = []
 

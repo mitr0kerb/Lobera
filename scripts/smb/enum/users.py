@@ -1,9 +1,9 @@
 
 # scripts/smb/enum/users.py
 """
-Enumerate domain/local users via RID cycling over SMB (SAMR pipe).
-Works with null session or valid credentials.
-No LDAP required — pure SMB named pipe.
+Enumera usuarios de dominio/locales via RID cycling sobre SMB (pipe SAMR).
+Funciona con null session o credenciales válidas.
+No requiere LDAP — solo pipe SMB.
 """
 from core.output import console, print_result, print_table
 from core import session_db
@@ -21,11 +21,11 @@ class Script(BaseScript):
     name        = "users"
     protocol    = "smb"
     category    = "enum"
-    description = "Enumerate users via RID cycling over SAMR pipe (works with null session)."
+    description = "Enumera usuarios via RID cycling sobre el pipe SAMR (funciona con null session)."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -43,7 +43,7 @@ class Script(BaseScript):
             conn = SMBConnection(ip, ip, timeout=timeout)
             conn.login(user, passwd, domain, lm_hash, nt_hash)
         except Exception as e:
-            print_result("SMB", ip, "fail", f"Connection failed: {e}"); return None
+            print_result("SMB", ip, "fail", f"Conexión fallida: {e}"); return None
 
         try:
             rpctransport = transport.SMBTransport(
@@ -91,8 +91,8 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"SAMR error: {e}"); return None
 
         if users:
-            print_table(f"Users on {ip} ({domain_name})", ["RID", "Username"], users)
-            print_result("SMB", ip, "ok", f"{len(users)} user(s) found")
+            print_table(f"Usuarios en {ip} ({domain_name})", ["RID", "Usuario"], users)
+            print_result("SMB", ip, "ok", f"{len(users)} usuario(s) encontrado(s)")
         else:
-            print_result("SMB", ip, "info", "No users found via RID cycling")
+            print_result("SMB", ip, "info", "No se encontraron usuarios via RID cycling")
         return users

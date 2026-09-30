@@ -1,5 +1,5 @@
 # scripts/smb/enum/os_info.py
-"""Detailed OS info via SMB + SRVSVC: hostname, OS, version, server type."""
+"""Información detallada del OS via SMB + SRVSVC: hostname, OS, versión, tipo de servidor."""
 from core.output import console, print_result
 from core import session_db
 from scripts.base import BaseScript
@@ -16,7 +16,7 @@ except ImportError:
 
 
 def _safe_dialect(raw):
-    """Convert impacket dialect value to int safely, regardless of type."""
+    """Convierte el valor de dialecto de impacket a int de forma segura, independientemente del tipo."""
     if isinstance(raw, int):
         return raw
     if isinstance(raw, bytes):
@@ -34,11 +34,11 @@ class Script(BaseScript):
     name        = "os-info"
     protocol    = "smb"
     category    = "enum"
-    description = "Detailed OS info via SMB/RPC: hostname, OS, build, dialect, signing, server type."
+    description = "Información detallada del OS via SMB/RPC: hostname, OS, build, dialecto, signing, tipo de servidor."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -60,7 +60,7 @@ class Script(BaseScript):
             info["domain"]   = conn.getServerDomain()        or "—"
             info["dns"]      = conn.getServerDNSDomainName() or "—"
 
-            # Safe dialect conversion — avoids 'Unknown format code x for str'
+            # Conversión segura de dialecto — evita error de formato desconocido para str
             d = _safe_dialect(conn.getDialect())
             info["dialect"] = {
                 0x0001: "SMBv1",
@@ -71,9 +71,9 @@ class Script(BaseScript):
                 0x0311: "SMBv3.1.1",
             }.get(d, f"Unknown (0x{d:04x})")
 
-            info["signing"] = "Required" if conn.isSigningRequired() else "Not required"
+            info["signing"] = "Obligatorio" if conn.isSigningRequired() else "No obligatorio"
 
-            # Extra info via SRVSVC
+            # Info extra via SRVSVC
             try:
                 rpctransport = transport.SMBTransport(
                     ip, filename="\\srvsvc", smb_connection=conn
@@ -89,12 +89,12 @@ class Script(BaseScript):
                 info["comment"] = str(srv["sv101_comment"]).strip("\x00") or "—"
                 dce.disconnect()
             except Exception:
-                pass  # SRVSVC optional — don't fail if unavailable
+                pass  # SRVSVC es opcional — no fallar si no está disponible
 
             conn.logoff()
 
         except Exception as e:
-            print_result("SMB", ip, "fail", f"Connection failed: {e}"); return None
+            print_result("SMB", ip, "fail", f"Conexión fallida: {e}"); return None
 
         # Render
         t = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
@@ -102,21 +102,21 @@ class Script(BaseScript):
         t.add_column(style="bold")
 
         for label, key in [
-            ("Hostname",    "hostname"),
+            ("Hostname",       "hostname"),
             ("OS",          "os"),
             ("Domain",      "domain"),
-            ("DNS Domain",  "dns"),
-            ("SMB Dialect", "dialect"),
-            ("SMB Signing", "signing"),
+            ("Dominio DNS",    "dns"),
+            ("Dialecto SMB",  "dialect"),
+            ("Signing SMB",   "signing"),
             ("Version",     "version"),
-            ("Comment",     "comment"),
+            ("Comentario",    "comment"),
         ]:
             if key in info:
                 t.add_row(label, info[key])
 
         console.print(Panel(
             t,
-            title=f"[bold green]OS Info — {ip}[/bold green]",
+            title=f"[bold green]Info OS — {ip}[/bold green]",
             border_style="green",
             expand=False,
             padding=(1, 2),

@@ -256,7 +256,7 @@ class MSSQLModule:
         if output:
             session_db.save_finding(self.target.ip, PROTO, "agent_job_exec",
                                     "cmd=" + command + " output=" + output[:200])
-            print_result(PROTO, self.target.ip, "pwned", "Agent Job exec completado")
+            print_result(PROTO, self.target.ip, "pwned", "Agent Job ejecutado con éxito")
         return output or None
 
     def linked_server_exec(self, linked_server, command):

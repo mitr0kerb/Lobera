@@ -1,6 +1,6 @@
 
 # scripts/smb/post/task_list.py
-"""Enumerate scheduled tasks on the remote host via TSCH pipe."""
+"""Enumera tareas programadas en el host remoto via pipe TSCH."""
 from core.output import console, print_result, print_table
 from core import session_db
 from scripts.base import BaseScript
@@ -17,11 +17,11 @@ class Script(BaseScript):
     name        = "task-list"
     protocol    = "smb"
     category    = "post"
-    description = "List scheduled tasks on the remote host via TSCH pipe. Requires admin."
+    description = "Lista tareas programadas en el host remoto via pipe TSCH. Requiere admin."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -55,8 +55,8 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"TSCH error: {e}"); return None
 
         if tasks:
-            print_table(f"Scheduled tasks on {ip}", ["Task Name"], tasks)
-            print_result("SMB", ip, "ok", f"{len(tasks)} task(s) found")
+            print_table(f"Tareas programadas en {ip}", ["Nombre de tarea"], tasks)
+            print_result("SMB", ip, "ok", f"{len(tasks)} tarea(s) encontrada(s)")
         else:
-            print_result("SMB", ip, "info", "No scheduled tasks found (or access denied)")
+            print_result("SMB", ip, "info", "No se encontraron tareas programadas (o acceso denegado)")
         return tasks

@@ -1,6 +1,6 @@
 
 # scripts/smb/enum/sessions.py
-"""Enumerate active SMB sessions via NetSessEnum (SRVSVC pipe)."""
+"""Enumera sesiones SMB activas via NetSessEnum (pipe SRVSVC)."""
 from core.output import console, print_result, print_table
 from core import session_db
 from scripts.base import BaseScript
@@ -17,11 +17,11 @@ class Script(BaseScript):
     name        = "sessions"
     protocol    = "smb"
     category    = "enum"
-    description = "Enumerate active SMB sessions on the server via SRVSVC (NetSessEnum)."
+    description = "Enumera sesiones SMB activas en el servidor via SRVSVC (NetSessEnum)."
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -54,8 +54,8 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"SRVSVC error: {e}"); return None
 
         if sessions:
-            print_table(f"Active sessions on {ip}", ["Client", "User", "Time (s)"], sessions)
-            print_result("SMB", ip, "ok", f"{len(sessions)} session(s) found")
+            print_table(f"Sesiones activas en {ip}", ["Cliente", "Usuario", "Tiempo (s)"], sessions)
+            print_result("SMB", ip, "ok", f"{len(sessions)} sesión/sesiones encontrada(s)")
         else:
-            print_result("SMB", ip, "info", "No active sessions found")
+            print_result("SMB", ip, "info", "No se encontraron sesiones activas")
         return sessions

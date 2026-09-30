@@ -283,7 +283,7 @@ class LDAPModule:
             # Bind
             if self.creds.is_null_session():
                 conn.login("", "", "", "", "")
-                print_result("LDAP", self.target.ip, "ok", "anonymous bind")
+                print_result("LDAP", self.target.ip, "ok", "enlace anónimo")
             elif self.creds.hash:
                 lm_hash, nt_hash = self._split_hash(self.creds.hash)
                 conn.login(

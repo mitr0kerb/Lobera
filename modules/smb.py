@@ -88,7 +88,7 @@ class SMBModule:
             return True
         except Exception as e:
             reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+            print_result(self._proto(), self.target.ip, "fail", f"Fallo, motivo: [bold white]{reason}[/bold white]")
             return False
 
     def disconnect(self):
@@ -135,7 +135,7 @@ class SMBModule:
             return required
         except Exception as e:
             reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-            print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+            print_result(self._proto(), self.target.ip, "fail", f"Fallo, motivo: [bold white]{reason}[/bold white]")
             return None
 
     def _decode_share_type(self, share_type):
@@ -166,7 +166,7 @@ class SMBModule:
         except Exception as e:
             if not silent:
                 reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-                print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+                print_result(self._proto(), self.target.ip, "fail", f"Fallo, motivo: [bold white]{reason}[/bold white]")
             return []
 
     def list_files(self, share_name, path="", silent=False):
@@ -192,7 +192,7 @@ class SMBModule:
         except Exception as e:
             if not silent:
                 reason = e.getErrorString()[0] if hasattr(e, "getErrorString") else str(e)
-                print_result(self._proto(), self.target.ip, "fail", f"Failed, reason: [bold white]{reason}[/bold white]")
+                print_result(self._proto(), self.target.ip, "fail", f"Fallo, motivo: [bold white]{reason}[/bold white]")
             return []
 
     def download_file(self, share_name, remote_path, local_path):
@@ -317,7 +317,7 @@ class SMBModule:
         for name, share_type, comment in shares:
             if not include_special and "special" in share_type:
                 continue
-            print_result(self._proto(), self.target.ip, "info", f"Looking for share: {name}...")
+            print_result(self._proto(), self.target.ip, "info", f"Revisando share: {name}...")
             downloaded = self.spider_share(
                 name, extensions=extensions, keywords=keywords,
                 max_depth=max_depth, confirm=confirm,

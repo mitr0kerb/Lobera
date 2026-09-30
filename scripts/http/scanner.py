@@ -148,8 +148,8 @@ class HTTPScanner(Scanner):
         if r: self._critical(f"{len(r)} ruta(s) encontrada(s)")
         else: self._ok("Dir bruteforce sin resultados")
     def _on_header_inj(self, r):
-        if r: self._critical(f"Host header injection — {len(r)} vector(es)")
-        else: self._ok("Sin header injection")
+        if r: self._critical(f"Inyección de cabecera Host — {len(r)} vector(es)")
+        else: self._ok("Sin inyección de cabecera")
     def _on_open_redirect(self, r):
         if r: self._critical(f"Open redirect — {len(r)} param(s)")
         else: self._ok("Sin open redirects")
@@ -188,7 +188,7 @@ class HTTPScanner(Scanner):
     def _on_links(self, r):
         if r: self._ok(f"{len(r.get('internal',[]))} links, {len(r.get('api',[]))} API endpoints")
     def _on_crawl(self, r):
-        if r: self._ok(f"Crawl: {len(r.get('pages',[]))} páginas, {len(r.get('forms',[]))} forms")
+        if r: self._ok(f"Rastreo: {len(r.get('pages',[]))} páginas, {len(r.get('forms',[]))} formularios")
 
     def _build_kwargs(self, script_name):
         p = self.ctx.params

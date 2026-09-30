@@ -1,8 +1,8 @@
 
 # scripts/smb/attack/delegation_check.py
 """
-Check for unconstrained delegation accounts reachable via SMB.
-Queries SAMR for computer accounts with TrustedForDelegation flag.
+Busca cuentas con delegación sin restricciones accesibles via SMB.
+Consulta SAMR para cuentas de equipo con el flag TrustedForDelegation.
 """
 from core.output import console, print_result, print_table
 from core import session_db
@@ -15,7 +15,7 @@ try:
 except ImportError:
     _OK = False
 
-# UAC flag: TRUSTED_FOR_DELEGATION = 0x80000
+# Flag UAC: TRUSTED_FOR_DELEGATION = 0x80000
 _TRUSTED_FOR_DELEGATION = 0x80000
 
 
@@ -24,13 +24,13 @@ class Script(BaseScript):
     protocol    = "smb"
     category    = "attack"
     description = (
-        "Find accounts with unconstrained delegation via SAMR (TrustedForDelegation UAC flag). "
-        "These accounts can capture TGTs when any user authenticates to them."
+        "Busca cuentas con delegación sin restricciones via SAMR (flag UAC TrustedForDelegation). "
+        "Estas cuentas pueden capturar TGTs cuando cualquier usuario se autentica en ellas."
     )
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]"); return None
+            console.print("[red]impacket no está instalado.[/red]"); return None
 
         ip      = self.target.ip
         domain  = self.creds.domain   or ""
@@ -59,7 +59,7 @@ class Script(BaseScript):
             resp4 = samr.hSamrOpenDomain(dce, server_handle, domainId=resp3["DomainId"])
             dh = resp4["DomainHandle"]
 
-            # Enumerate all users + computers (RIDs 500–3000 heuristic)
+            # Enumerar usuarios y equipos (RIDs 500–3000 heurístico)
             for rid in range(500, 3001):
                 try:
                     rh = samr.hSamrOpenUser(dce, dh, userId=rid)
@@ -71,7 +71,7 @@ class Script(BaseScript):
                     name = str(info["Buffer"]["All"]["UserName"])
                     samr.hSamrCloseHandle(dce, rh["UserHandle"])
                     if uac & _TRUSTED_FOR_DELEGATION and name:
-                        account_type = "Computer" if name.endswith("$") else "User"
+                        account_type = "Equipo" if name.endswith("$") else "Usuario"
                         vulnerable.append((name, account_type, f"UAC=0x{uac:08x}"))
                         session_db.DB.SaveFinding(
                             ip, "SMB", "unconstrained_delegation",
@@ -85,10 +85,10 @@ class Script(BaseScript):
             print_result("SMB", ip, "fail", f"SAMR error: {e}"); return None
 
         if vulnerable:
-            print_table(f"Unconstrained delegation accounts on {ip}",
-                        ["Account", "Type", "UAC"], vulnerable)
+            print_table(f"Cuentas con delegación sin restricciones en {ip}",
+                        ["Cuenta", "Tipo", "UAC"], vulnerable)
             print_result("SMB", ip, "pwned",
-                         f"{len(vulnerable)} account(s) with unconstrained delegation")
+                         f"{len(vulnerable)} cuenta(s) con delegación sin restricciones")
         else:
-            print_result("SMB", ip, "ok", "No unconstrained delegation accounts found")
+            print_result("SMB", ip, "ok", "No se encontraron cuentas con delegación sin restricciones")
         return vulnerable

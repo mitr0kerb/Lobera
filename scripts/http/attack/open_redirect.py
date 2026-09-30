@@ -61,7 +61,7 @@ class Script(BaseScript):
                     pass
 
         if findings:
-            print_table(f"Open Redirects — {ip}:{port}",
+            print_table(f"Redirecciones Abiertas — {ip}:{port}",
                         ["Parámetro","Payload","Código","Location"], findings)
         else:
             print_check("Sin open redirects", ok=True)

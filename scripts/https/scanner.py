@@ -132,17 +132,17 @@ class HTTPSScanner(Scanner):
     def _on_sec_headers(self, r):
         if not r: return
         grade = r.get("grade","?"); pct = r.get("score",0)
-        if grade in ("F","D"):   self._critical(f"Security headers: grado {grade} ({pct}%)")
-        elif grade in ("A","A+"): self._ok(f"Security headers: grado {grade} ({pct}%)")
-        else:                     self._warn(f"Security headers: grado {grade} ({pct}%)")
+        if grade in ("F","D"):   self._critical(f"Cabeceras de seguridad: grado {grade} ({pct}%)")
+        elif grade in ("A","A+"): self._ok(f"Cabeceras de seguridad: grado {grade} ({pct}%)")
+        else:                     self._warn(f"Cabeceras de seguridad: grado {grade} ({pct}%)")
     def _on_cert_pin(self, r):
-        if r and not r.get("has_pinning"): self._warn("Sin certificate pinning detectado")
-        elif r: self._ok("Certificate pinning presente")
+        if r and not r.get("has_pinning"): self._warn("Sin certificate pinning")
+        elif r: self._ok("Certificate pinning activo")
     def _on_robots(self, r):
         if r and r.get("interesting"): self._critical(f"Rutas interesantes: {', '.join(r['interesting'][:3])}")
         elif r: self._ok("robots.txt sin rutas interesantes")
     def _on_cors(self, r):
-        if r: self._critical(f"CORS misconfigured — {len(r)} problema(s)")
+        if r: self._critical(f"CORS mal configurado — {len(r)} problema(s)")
         else: self._ok("CORS correcto")
     def _on_js(self, r):
         if r: self._critical(f"Secretos en JS: {len(r)} hallazgo(s)")
@@ -154,8 +154,8 @@ class HTTPSScanner(Scanner):
         if r: self._critical(f"Cache poisoning — {len(r)} vector(es)")
         else: self._ok("Sin cache poisoning")
     def _on_oauth(self, r):
-        if r and r.get("findings"): self._critical(f"OAuth misconfigured — {len(r['findings'])} problema(s)")
-        elif r: self._ok("OAuth sin misconfiguraciones obvias")
+        if r and r.get("findings"): self._critical(f"OAuth mal configurado — {len(r['findings'])} problema(s)")
+        elif r: self._ok("OAuth sin errores de configuración")
     def _on_jwt(self, r):
         if r and r.get("findings"): self._critical(f"JWT vulnerable — {len(r['findings'])} ataque(s)")
         else: self._ok("JWT sin vulnerabilidades obvias")
@@ -183,12 +183,12 @@ class HTTPSScanner(Scanner):
         if r and r.get("vulnerable"): self._critical("SPRING4SHELL RCE confirmado")
         else: self._ok("Sin Spring4Shell")
     def _on_jenkins(self, r):
-        if r: self._critical(f"JENKINS FILE READ — {len(r)} fichero(s) leído(s)")
-        elif r is not None: self._ok("Jenkins sin file read confirmado")
+        if r: self._critical(f"JENKINS LECTURA DE FICHERO — {len(r)} fichero(s) leído(s)")
+        elif r is not None: self._ok("Jenkins sin lectura de fichero confirmada")
     def _on_links(self, r):
         if r: self._ok(f"{len(r.get('internal',[]))} links, {len(r.get('api',[]))} API endpoints")
     def _on_crawl(self, r):
-        if r: self._ok(f"Crawl: {len(r.get('pages',[]))} páginas, {len(r.get('forms',[]))} forms")
+        if r: self._ok(f"Rastreo: {len(r.get('pages',[]))} páginas, {len(r.get('forms',[]))} formularios")
 
     def _warn(self, msg):
         from core.output import print_result

