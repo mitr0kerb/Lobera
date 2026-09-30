@@ -150,6 +150,15 @@ def _run_proto(protocol, args):
 
 # ── Funciones por protocolo ───────────────────────────────────────────────────
 
+def run_report(args):
+    from core.report import generate_report
+    target = getattr(args, "target", None)
+    fmt    = getattr(args, "format", "html") or "html"
+    output = getattr(args, "output", None)
+    path   = generate_report(target_ip=target, fmt=fmt, output=output)
+    console.print(f"[bold green]Informe generado:[/bold green] {path}")
+
+
 def run_smb(args):      _run_proto("smb",      args)
 def run_kerberos(args): _run_proto("kerberos", args)
 def run_rpc(args):      _run_proto("rpc",      args)
@@ -427,6 +436,16 @@ def build_parser():
     db_delete.add_argument("-t", "--target",    default=None)
     db_delete.add_argument("--yes",             action="store_true")
 
+    # ── report ────────────────────────────────────────────────────────────────
+    rep_p = subs.add_parser("report", help="Genera informe HTML/Markdown a partir de la DB")
+    rep_p.add_argument("-t", "--target",  default=None,
+                       help="IP a reportar (omitir = todos los objetivos)")
+    rep_p.add_argument("--format",        default="html", choices=["html", "md"],
+                       dest="format",
+                       help="Formato del informe: html (default) o md")
+    rep_p.add_argument("-o", "--output",  default=None,
+                       help="Ruta de salida (auto-generada si se omite)")
+
     return parser
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -461,7 +480,8 @@ def main():
             "[bold deep_sky_blue1]https[/bold deep_sky_blue1] · "
             "[bold orange1]ftp[/bold orange1] · "
             "[bold bright_red]mssql[/bold bright_red] · "
-            "[bold white]db[/bold white]"
+            "[bold white]db[/bold white] · "
+            "[bold white]report[/bold white]"
         )
         console.print("[dim]lobera.py <módulo>                    → árbol de scripts disponibles[/dim]")
         console.print("[dim]lobera.py <módulo> --script=<nombre>  → ver parámetros / ejecutar[/dim]")
@@ -482,6 +502,7 @@ def main():
         "ftp":      run_ftp,
         "mssql":    run_mssql,
         "db":       run_db,
+        "report":   run_report,
     }
     runner = dispatch.get(args.module)
     if runner:

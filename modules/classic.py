@@ -200,11 +200,60 @@ def _build_target_creds(args):
         domain=getattr(args, "domain", "") or "",
         timeout=int(getattr(args, "timeout", None) or 5),
     )
+    user     = getattr(args, "user",     None) or ""
+    password = getattr(args, "password", None) or ""
+    hash_    = getattr(args, "hash",     None)
+    domain   = getattr(args, "domain",   None) or ""
+
+    # ── Correlación de credenciales ──────────────────────────────────────────
+    # Si no se proporcionaron credenciales pero existen en la DB para este IP,
+    # ofrecerlas automáticamente (solo en modo interactivo / TTY).
+    if target.ip and not user and not password and not hash_:
+        try:
+            import sys
+            from core.session_db import get_credentials
+            saved = get_credentials(target.ip, only_valid=True)
+            if saved and sys.stdin.isatty():
+                console.print(
+                    f"  [bold yellow]⚡ Credenciales guardadas para {target.ip}:[/bold yellow]"
+                )
+                for i, c in enumerate(saved[:5], 1):
+                    secret_preview = (c.get("secret") or "")[:6] + "…" if c.get("secret") else "-"
+                    console.print(
+                        f"  [{i}] {c['user']} / {secret_preview}"
+                        f" [{c.get('type','?')}] (via {c.get('source','-')})"
+                    )
+                console.print(
+                    "  [dim]Intro = usar la primera · número = elegir · [bold]n[/bold] = no usar[/dim]"
+                )
+                choice = console.input("  Selección: ").strip().lower()
+                if choice in ("", "y", "s", "1") and saved:
+                    idx = 0
+                elif choice.isdigit() and 1 <= int(choice) <= len(saved):
+                    idx = int(choice) - 1
+                else:
+                    idx = None
+
+                if idx is not None:
+                    c = saved[idx]
+                    user   = c.get("user", "")
+                    domain = c.get("domain") or domain
+                    if c.get("type") == "hash":
+                        hash_ = c.get("secret")
+                    else:
+                        password = c.get("secret", "")
+                    console.print(
+                        f"  [dim]Usando: {user}"
+                        f"{('@' + domain) if domain else ''}[/dim]"
+                    )
+        except Exception:
+            pass  # La correlación falla en silencio
+
     creds = Creds(
-        user=getattr(args, "user", "") or "",
-        password=getattr(args, "password", "") or "",
-        domain=getattr(args, "domain", "") or "",
-        hash=getattr(args, "hash", None),
+        user=user,
+        password=password,
+        domain=domain,
+        hash=hash_,
     )
     return target, creds
 
