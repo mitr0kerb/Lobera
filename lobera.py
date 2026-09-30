@@ -16,7 +16,7 @@ def show_banner():
     import pyfiglet
     art = pyfiglet.figlet_format("LOBERA", font="slant")
     console.print(f"[bold cyan]{art}[/bold cyan]")
-    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan[/dim]")
+    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan · Listen · AMSI[/dim]")
     console.print("[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
 # ── Tablas de shells / scanners ───────────────────────────────────────────────
@@ -265,6 +265,68 @@ def run_scan(args):
         closed  = getattr(args, "closed",  False),
     )
 
+
+def run_listen(args):
+    """Arranca el handler/listener para reverse shells."""
+    from scripts.listener.handler import Handler
+
+    port     = getattr(args, "port",  4444)
+    ltype    = getattr(args, "type",  "tcp")
+    certfile = getattr(args, "cert",  None)
+    multi    = getattr(args, "multi", False)
+    log_file = getattr(args, "log",   None)
+
+    h = Handler(port, ltype, certfile, multi, log_file)
+    h.start()
+
+
+def run_amsi(args):
+    """Wrapper Python para el binario AMSI/ETW bypass (C)."""
+    import subprocess, os, json
+
+    bin_path = os.path.join(os.path.dirname(__file__), "bin", "lobera-amsi-bypass.exe")
+    if not os.path.isfile(bin_path):
+        console.print(f"[red]Binario no encontrado: {bin_path}[/red]")
+        console.print("[dim]Compila primero: cd src/exploits && make windows[/dim]")
+        console.print("\n[yellow]Instrucciones manuales:[/yellow]")
+        console.print("  1. Compila en Windows o cross-compila con mingw:")
+        console.print("     x86_64-w64-mingw32-gcc -O2 -o lobera-amsi-bypass.exe src/exploits/amsi/amsi_bypass.c -lkernel32")
+        console.print("  2. Transfiere lobera-amsi-bypass.exe al objetivo Windows")
+        console.print("  3. Ejecuta: lobera-amsi-bypass.exe --patch-amsi [--patch-etw] [--check]")
+        return
+
+    cmd = [bin_path]
+    if getattr(args, "patch_amsi", False): cmd.append("--patch-amsi")
+    if getattr(args, "patch_etw",  False): cmd.append("--patch-etw")
+    if getattr(args, "check",      False): cmd.append("--check")
+    if getattr(args, "delay",      False): cmd.append("--delay")
+    delay_ms = getattr(args, "delay_ms", 5000)
+    if delay_ms != 5000: cmd += ["--delay-ms", str(delay_ms)]
+    load_dll = getattr(args, "load_dll", None)
+    if load_dll: cmd += ["--load", load_dll]
+
+    if len(cmd) == 1:
+        console.print("[yellow]Especifica al menos una opción:[/yellow]")
+        console.print("  --patch-amsi   Parchear AmsiScanBuffer")
+        console.print("  --patch-etw    Silenciar ETW (NtTraceEvent)")
+        console.print("  --check        Verificar si AMSI está activo")
+        console.print("  --delay        Delay de evasión de sandbox")
+        console.print("  --load DLL     Cargar DLL reflectiva")
+        return
+
+    console.print(f"  [dim]Ejecutando: {' '.join(cmd)}[/dim]")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            for k, v in data.items():
+                color = "green" if v is True else ("red" if v is False else "dim")
+                console.print(f"  [{color}]{k}[/{color}]: {v}")
+        except json.JSONDecodeError:
+            console.print(result.stdout)
+    if result.stderr:
+        console.print(f"  [dim]{result.stderr.strip()}[/dim]")
+
 # ── db ────────────────────────────────────────────────────────────────────────
 
 def run_db(args):
@@ -488,6 +550,28 @@ def _add_proto_flags(p):
     p.add_argument("--max-pages",      default=None, type=int, dest="max_pages",
                    help="Páginas máximas de crawling")
 
+    # ── Pass-the-Hash / lateral movement ─────────────────────────────────────
+    p.add_argument("--exec",           default=None,
+                   help="Comando a ejecutar (pass-the-hash, dcom-exec)")
+    p.add_argument("--shell",          action="store_true", default=False,
+                   help="Modo shell interactivo (pass-the-hash)")
+    p.add_argument("--method",         default=None,
+                   choices=["smbexec", "wmiexec", "atexec"],
+                   help="Método de ejecución PtH (default: smbexec)")
+    p.add_argument("--object",         default=None,
+                   choices=["MMC20", "ShellWindows", "ShellBrowserWindow"],
+                   help="Objeto DCOM para dcom-exec (default: MMC20)")
+
+    # ── DCSync ────────────────────────────────────────────────────────────────
+    p.add_argument("--dc-user",        default=None, dest="dc_user",
+                   help="Usuario específico a extraer con DCSync")
+    p.add_argument("--all",            action="store_true", default=False,
+                   help="Volcar todos los hashes (DCSync --all)")
+
+    # ── Privesc check ─────────────────────────────────────────────────────────
+    p.add_argument("--full",           action="store_true", default=False,
+                   help="Checks adicionales (tareas programadas, DLL hijack, etc.)")
+
 
 def build_parser():
     import argparse
@@ -608,6 +692,35 @@ def build_parser():
     comp_p.add_argument("--shell", default="bash", choices=["bash", "zsh"],
                         help="Shell de destino (bash o zsh)")
 
+    # ── listen ────────────────────────────────────────────────────────────────
+    lst_p = subs.add_parser("listen", help="Handler/listener para reverse shells TCP/HTTP/HTTPS")
+    lst_p.add_argument("-p", "--port",  default=4444, type=int,
+                       help="Puerto a escuchar (default: 4444)")
+    lst_p.add_argument("--type",        default="tcp", choices=["tcp", "http", "https"],
+                       dest="type", help="Tipo de listener (default: tcp)")
+    lst_p.add_argument("--cert",        default=None,
+                       help="Certificado .pem para HTTPS")
+    lst_p.add_argument("--multi",       action="store_true", default=False,
+                       help="Aceptar múltiples conexiones simultáneas")
+    lst_p.add_argument("--log",         default=None,
+                       help="Fichero donde guardar el log de sesiones")
+
+    # ── amsi-bypass ───────────────────────────────────────────────────────────
+    amsi_p = subs.add_parser("amsi", help="AMSI/ETW bypass (requiere compilar src/exploits/amsi/)")
+    amsi_p.add_argument("-t", "--target",    default=None, help="IP del objetivo (opcional, si se lanza remoto)")
+    amsi_p.add_argument("--patch-amsi",      action="store_true", dest="patch_amsi",
+                        help="Parchear AmsiScanBuffer")
+    amsi_p.add_argument("--patch-etw",       action="store_true", dest="patch_etw",
+                        help="Parchear NtTraceEvent (silenciar ETW)")
+    amsi_p.add_argument("--check",           action="store_true",
+                        help="Verificar si AMSI está activo")
+    amsi_p.add_argument("--delay",           action="store_true",
+                        help="Delay de evasión de sandbox")
+    amsi_p.add_argument("--delay-ms",        default=5000, type=int, dest="delay_ms",
+                        help="Milisegundos de delay (default: 5000)")
+    amsi_p.add_argument("--load",            default=None, dest="load_dll",
+                        help="Cargar DLL reflectiva desde ruta")
+
     return parser
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -643,7 +756,9 @@ def main():
             "[bold orange1]ftp[/bold orange1] · "
             "[bold bright_red]mssql[/bold bright_red] · "
             "[bold white]db[/bold white] · "
-            "[bold white]report[/bold white]"
+            "[bold white]report[/bold white] · "
+            "[bold white]listen[/bold white] · "
+            "[bold white]amsi[/bold white]"
         )
         console.print("[dim]lobera.py <módulo>                    → árbol de scripts disponibles[/dim]")
         console.print("[dim]lobera.py <módulo> --script=<nombre>  → ver parámetros / ejecutar[/dim]")
@@ -666,6 +781,8 @@ def main():
         "exploit":    run_exploit,
         "crack":      run_crack,
         "scan":       run_scan,
+        "listen":     run_listen,
+        "amsi":       run_amsi,
         "db":         run_db,
         "report":     run_report,
         "completion": run_completion,
