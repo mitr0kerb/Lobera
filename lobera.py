@@ -198,6 +198,18 @@ def run_ftp(args):      _run_proto("ftp",      args)
 def run_mssql(args):    _run_proto("mssql",    args)
 
 
+def run_crack(args):
+    """Dispatcher para el cracker offline (Rust binary)."""
+    from core.target import Target
+    from core.credentials import Credentials
+    from scripts.crack.hash_crack import Script
+
+    target = Target(ip="localhost")
+    creds  = Credentials()
+    script = Script(target=target, creds=creds)
+    script.run(args)
+
+
 def run_scan(args):
     """Dispatcher para el módulo scan (Go binary)."""
     from core.target import Target
@@ -474,6 +486,22 @@ def build_parser():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
+    # ── crack (Rust binary) ──────────────────────────────────────────────────
+    crack_p = subs.add_parser("crack", help="Crackeo offline de hashes Kerberos/NTLM (Rust, multi-core)")
+    crack_p.add_argument("-f", "--format",   required=True,
+                         choices=["asrep", "tgs", "ntlm", "ntlmv2", "auto"],
+                         help="Formato del hash: asrep | tgs | ntlm | ntlmv2 | auto")
+    crack_p.add_argument("-H", "--hash",     required=True,
+                         help="Hash en texto o ruta a fichero con múltiples hashes")
+    crack_p.add_argument("-w", "--wordlist", required=True,
+                         help="Ruta al diccionario (ej: /usr/share/wordlists/rockyou.txt)")
+    crack_p.add_argument("-t", "--threads",  default=None, type=int,
+                         help="Número de threads (default: núcleos de la CPU)")
+    crack_p.add_argument("--progress",       default=10000, type=int,
+                         help="Mostrar progreso cada N contraseñas (default: 10000)")
+    crack_p.add_argument("--json-only",      action="store_true", dest="json_only",
+                         help="Suprimir stderr del cracker (solo JSON a stdout)")
+
     # ── scan (Go binary) ─────────────────────────────────────────────────────
     scan_p = subs.add_parser("scan", help="Scanner de puertos y servicios (Go) — IP, CIDR o rango")
     scan_p.add_argument("-t", "--target",  required=True,
@@ -578,6 +606,7 @@ def main():
         "https":    run_https,
         "ftp":      run_ftp,
         "mssql":    run_mssql,
+        "crack":      run_crack,
         "scan":       run_scan,
         "db":         run_db,
         "report":     run_report,
