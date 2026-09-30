@@ -6,18 +6,26 @@ from rich.table import Table
 console = Console()
 
 PROTOCOL_COLORS = {
-    "SMB": "green",
-    "RPC": "blue",
-    "LDAP": "yellow",
-    "KRB": "magenta",
-    "WINRM": "cyan",
+    "SMB":    "green",
+    "RPC":    "blue",
+    "LDAP":   "yellow",
+    "KRB":    "magenta",
+    "WINRM":  "cyan",
+    "SSH":    "turquoise2",
+    "SSL":    "gold1",
+    "HTTP":   "bright_cyan",
+    "HTTPS":  "deep_sky_blue1",
+    "FTP":    "orange1",
+    "MSSQL":  "bright_red",
+    "KERBEROS": "magenta",
 }
 
 STATUS_LABELS = {
-    "ok": ("bold green", "OK"),
-    "pwned": ("bold green", "P"),
-    "fail": ("bold red", "F"),
-    "info": ("bold blue", "I"),
+    "ok":    ("bold green",          "OK"),
+    "pwned": ("bold white on red",   "PWNED"),
+    "warn":  ("bold yellow",         "WARN"),
+    "fail":  ("bold red",            "FAIL"),
+    "info":  ("bold cyan",           "INFO"),
 }
 
 
@@ -38,13 +46,23 @@ def print_result(protocol, target_ip, status, message):
     Línea de output homogénea para eventos puntuales.
     'protocol' puede ser la base ("SMB") o incluir versión ("SMBv2.1") —
     el color se resuelve por prefijo en ambos casos.
-    El status se marca con una letra: OK, P (pwned), F (fail), I (info).
 
-    Ej: OK [SMBv2.1] 10.129.61.52 - null session permitida
+    Status disponibles:
+      ok    → verde         (operación correcta sin impacto de seguridad)
+      pwned → rojo/blanco   (credencial válida, acceso obtenido — crítico)
+      warn  → amarillo      (hallazgo de seguridad relevante, no crítico)
+      fail  → rojo          (error o denegado)
+      info  → cyan          (informativo)
+
+    Ej: PWNED [SMBv2.1] 10.129.61.52 - login correcto como Administrator
     """
     color = _get_protocol_color(protocol)
     label_color, label = STATUS_LABELS.get(status, ("white", "?"))
-    console.print(f"[{label_color}]{label}[/{label_color}] [{color}][{protocol}][/{color}] {target_ip} - {message}")
+    console.print(
+        f"[{label_color}]{label:5}[/{label_color}] "
+        f"[{color}][{protocol}][/{color}] "
+        f"{target_ip} - {message}"
+    )
 
 
 def print_check(message, ok=True):
