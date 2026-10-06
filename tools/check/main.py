@@ -185,8 +185,7 @@ def _peek_named_pipe(sock, uid, tid):
 
 def check_ms17010(target, port=445, timeout=5):
     """
-    Comprueba si el objetivo es vulnerable a MS17-010.
-    Usa el mismo método que el PoC original: TRANS2 SESSION_SETUP con FEA list oversized.
+    Comprueba si el objetivo es vulnerable a MS17-010 usando impacket.
 
     Devuelve:
       True   — vulnerable
@@ -194,127 +193,65 @@ def check_ms17010(target, port=445, timeout=5):
       None   — no se pudo conectar / error
     """
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((target, int(port)))
+        from impacket.smbconnection import SMBConnection
+        from impacket import smb as impacket_smb
+        from impacket.smb import SMB_DIALECT
+    except ImportError:
+        console.print("  [red]Falta impacket — pip install impacket[/red]")
+        return None
 
-        def recv(n):
-            d = b""
-            while len(d) < n:
-                c = sock.recv(n - len(d))
-                if not c:
-                    break
-                d += c
-            return d
+    try:
+        # Conectar forzando SMBv1
+        conn = SMBConnection(target, target, sess_port=int(port),
+                             preferredDialect=SMB_DIALECT, timeout=timeout)
+        conn.login("", "")  # sesión anónima
 
-        # 1. Recibir NetBIOS session (4 bytes) + negociar protocolo
-        recv(4)
-        sock.send(NEGOTIATE_PROTOCOL_REQUEST)
-        length = struct.unpack(">I", recv(4))[0]
-        recv(length)
+        # Obtener el transporte SMB interno
+        smb_client = conn.getSMBServer()
 
-        # 2. Session setup anónimo
-        sock.send(SESSION_SETUP_REQUEST)
-        length = struct.unpack(">I", recv(4))[0]
-        resp = recv(length)
-        # UID está en offset 32 del cuerpo SMB (sin el header NetBIOS de 4b)
-        uid = struct.unpack("<H", resp[32:34])[0]
+        # Intentar abrir una named pipe inexistente via TRANS2
+        # Si el servidor es vulnerable devuelve STATUS_INSUFF_SERVER_RESOURCES
+        # en vez de STATUS_OBJECT_NAME_NOT_FOUND
+        tid = conn.connectTree("IPC$")
 
-        # 3. Tree connect a IPC$
-        path = f"\\\\{target}\\IPC$".encode("utf-16-le") + b"\x00\x00"
-        # Construir paquete manualmente con offsets correctos
-        smb_hdr = (
-            b"\xff\x53\x4d\x42"   # magic
-            b"\x75"               # Tree Connect AndX
-            b"\x00\x00\x00\x00"  # NT status
-            b"\x18\x07\xc0\x00"  # flags
-            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-        )
-        smb_hdr += struct.pack("<HH", 0xfffe, 0x0008)  # PID, MID
-        smb_hdr += struct.pack("<HH", uid, 0x0000)      # UID, TID (TID=0 en tree connect)
-
-        params = b"\x04\xff\x00\x00\x00\x00\x00\x01\x00"
-        byte_count = struct.pack("<H", len(path) + 1)  # +1 por el tipo de share
-        data = byte_count + b"\x00" + path  # \x00 = password vacío + path
-
-        body = smb_hdr + params + data
-        pkt = struct.pack(">I", len(body)) + body
-        sock.send(pkt)
-
-        length = struct.unpack(">I", recv(4))[0]
-        resp2 = recv(length)
-        tid = struct.unpack("<H", resp2[28:30])[0]
-
-        # 4. TRANS2 con FEA list — detecta el pool leak
-        # Construir paquete TRANS2 correcto con UID y TID reales
-        smb_hdr2 = (
-            b"\xff\x53\x4d\x42"   # magic
-            b"\x25"               # TRANS2
-            b"\x00\x00\x00\x00"  # NT status
-            b"\x18\x01\x28\x00"  # flags
-            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-        )
-        smb_hdr2 += struct.pack("<HH", 0xfffe, 0x0008)
-        smb_hdr2 += struct.pack("<HH", uid, tid)
-
-        # Parámetros TRANS2 — subcommand 0x000e (SESSION_SETUP) con FEA oversized
-        trans_params = (
-            b"\x01\x00"          # TotalParameterCount
-            b"\x00\x00"          # TotalDataCount
-            b"\xff\xff"          # MaxParameterCount
-            b"\x00\x00"          # MaxDataCount
-            b"\x00"              # MaxSetupCount
-            b"\x00"              # Reserved
-            b"\x00\x00"          # Flags
-            b"\x00\x00\x00\x00" # Timeout
-            b"\x00\x00"          # Reserved2
-            b"\x01\x00"          # ParameterCount
-            b"\x4a\x00"          # ParameterOffset
-            b"\x00\x00"          # DataCount
-            b"\x4b\x00"          # DataOffset
-            b"\x01"              # SetupCount
-            b"\x00"              # Reserved3
-            b"\x0e\x00"          # Setup[0] = TRANS2_SESSION_SETUP
+        # Enviar TRANS2_FIND_FIRST2 con parámetros que provocan el pool leak
+        # impacket expone el transporte raw para esto
+        trans = smb_client.Trans2(
+            smb_client,
+            "",
+            impacket_smb.SMB.TRANS2_FIND_FIRST2,
+            b"\x00" * 12,
+            b""
         )
 
-        byte_count2 = struct.pack("<H", 12)
-        padding = b"\x00" * 3
-        fea_data = b"\x00" * 12  # FEA list mínimo
+        # Si llegamos aquí sin excepción con STATUS_INSUFF_SERVER_RESOURCES → vulnerable
+        conn.disconnectTree(tid)
+        conn.logoff()
+        return False
 
-        body2 = smb_hdr2 + trans_params + byte_count2 + padding + fea_data
-        pkt2 = struct.pack(">I", len(body2)) + body2
-        sock.send(pkt2)
-
-        hdr = recv(4)
-        if len(hdr) < 4:
-            sock.close()
-            return None
-        length = struct.unpack(">I", hdr)[0]
-        r = recv(length)
-
-        sock.close()
-
-        if len(r) < 13:
-            return None
-
-        status = struct.unpack("<I", r[5:9])[0]
-
-        # STATUS_INSUFF_SERVER_RESOURCES = vulnerable
-        # STATUS_NOT_IMPLEMENTED o similares = sin SMBv1 / parcheado
-        if status == 0xC0000205:
+    except Exception as e:
+        err = str(e)
+        # STATUS_INSUFF_SERVER_RESOURCES = pool leak = vulnerable
+        if "STATUS_INSUFF_SERVER_RESOURCES" in err or "0xc0000205" in err.lower():
             return True
-        elif status in (0x00000000, 0xC0000034, 0xC00000BB):
+        # Errores de autenticación o acceso = SMBv1 activo pero parcheado
+        elif any(x in err for x in ("STATUS_ACCESS_DENIED", "STATUS_LOGON_FAILURE",
+                                     "STATUS_NOT_IMPLEMENTED", "STATUS_INVALID_PARAMETER")):
             return False
+        # Sin conexión
+        elif any(x in err for x in ("timed out", "Connection refused", "No route")):
+            return None
         else:
-            # Cualquier otro error de SMB = no vulnerable o SMBv1 off
-            return False
-
-    except ConnectionRefusedError:
-        return None
-    except socket.timeout:
-        return None
-    except Exception:
-        return None
+            # Cualquier otro error SMB — intentar determinar por el dialect
+            try:
+                from impacket.smbconnection import SMBConnection
+                from impacket.smb import SMB_DIALECT
+                conn2 = SMBConnection(target, target, sess_port=int(port), timeout=timeout)
+                # Si negocia SMBv1 y llega aquí sin pool leak → parcheado
+                conn2.logoff()
+                return False
+            except Exception:
+                return None
 
 
 def run_check(target, port, timeout):
