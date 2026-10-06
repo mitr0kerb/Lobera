@@ -62,6 +62,23 @@ def _build_mysmb_class():
             transData += (b'\x00' * padLen) + data
         transCmd['Data'] = transData
 
+    # SMBNTTransactionSecondary_Parameters no existe en todas las versiones de impacket.
+    # Se define aquí con la estructura del protocolo SMB (MS-CIFS §2.2.4.8.1),
+    # heredando de SMBCommand_Parameters igual que el resto de clases de impacket.
+    if not hasattr(impacket_smb, 'SMBNTTransactionSecondary_Parameters'):
+        class _SMBNTTransactionSecondary_Parameters(impacket_smb.SMBCommand_Parameters):
+            structure = (
+                ('TotalParameterCount',  '<L=0'),
+                ('TotalDataCount',       '<L=0'),
+                ('ParameterCount',       '<L=0'),
+                ('ParameterOffset',      '<L=0'),
+                ('ParameterDisplacement','<L=0'),
+                ('DataCount',            '<L=0'),
+                ('DataOffset',           '<L=0'),
+                ('DataDisplacement',     '<L=0'),
+            )
+        impacket_smb.SMBNTTransactionSecondary_Parameters = _SMBNTTransactionSecondary_Parameters
+
     class MYSMB(impacket_smb.SMB):
         def __init__(self, remote_host, remote_port=445, timeout=10):
             self._default_tid = 0
