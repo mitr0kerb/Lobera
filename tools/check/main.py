@@ -246,12 +246,11 @@ def _build_mysmb_class():
         def nt_create_andx(self, tid, filename, desiredAccess=0x02000000,
                            fileAttributes=0x80, shareMode=0x7,
                            disposition=1, createOptions=0):
+            # impacket ≥0.9.23: nt_create_andx(tid, filename, shareAccessMode, disposition, accessMask)
             fid = impacket_smb.SMB.nt_create_andx(self, tid, filename,
-                                                    desiredAccess=desiredAccess,
-                                                    shareMode=shareMode,
-                                                    creationDisposition=disposition,
-                                                    createOptions=createOptions,
-                                                    fileAttributes=fileAttributes)
+                                                    shareAccessMode=shareMode,
+                                                    disposition=disposition,
+                                                    accessMask=desiredAccess)
             self._last_fid = fid
             return fid
 
