@@ -567,8 +567,7 @@ def _add_proto_flags(p):
     p.add_argument("--hive",           default="HKLM", choices=["HKLM", "HKCU"],
                    help="Hive de registro para método registry (default: HKLM)")
     p.add_argument("--trigger",        default="logon",
-                   choices=["logon", "startup", "hourly", "daily"],
-                   help="Trigger para schtask (default: logon)")
+                   help="Trigger para schtask (logon|startup|hourly|daily) o expresión cron para SSH (default: logon)")
     p.add_argument("--local-file",     default=None, dest="local_file",
                    help="Ruta al archivo local para subir (método startup)")
 
@@ -581,6 +580,16 @@ def _add_proto_flags(p):
     # ── Privesc check ─────────────────────────────────────────────────────────
     p.add_argument("--full",           action="store_true", default=False,
                    help="Checks adicionales (tareas programadas, DLL hijack, etc.)")
+
+    # ── Coerción NTLM ─────────────────────────────────────────────────────────
+    p.add_argument("--technique",      default=None,
+                   choices=["petitpotam", "printerbug", "dfscoerce", "shadowcoerce"],
+                   help="Técnica de coerción NTLM")
+
+    # ── Phishing ──────────────────────────────────────────────────────────────
+    p.add_argument("--type",           default=None, dest="phishing_type",
+                   choices=["macro", "lnk", "hta", "scf", "url"],
+                   help="Tipo de payload phishing")
 
 
 def build_parser():
