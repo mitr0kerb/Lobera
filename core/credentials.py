@@ -22,3 +22,7 @@ class Creds:
     def __repr__(self):
         auth_mode = "ccache" if self.ccache else "hash" if self.hash else "password" if self.password else "null"
         return f"<Creds user={self.user!r} domain={self.domain!r} mode={auth_mode}>"
+
+
+# Alias para compatibilidad con importaciones existentes
+Credentials = Creds
