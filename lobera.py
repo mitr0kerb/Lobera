@@ -607,7 +607,7 @@ def build_parser():
     sc_p = exp_s.add_parser("shellcode", help="Ejecuta shellcode en memoria")
     sc_p.add_argument("-f", "--shellcode-file", dest="shellcode_file", default=None,
                       help="Fichero raw de shellcode (output de msfvenom -f raw)")
-    sc_p.add_argument("-h", "--shellcode-hex",  dest="shellcode_hex",  default=None,
+    sc_p.add_argument("-x", "--shellcode-hex",  dest="shellcode_hex",  default=None,
                       help="Shellcode como string hex (\\xfc\\x48...)")
     sc_p.add_argument("--method", default="direct", choices=["direct","thread","fork"],
                       help="Método de ejecución (default: direct)")
