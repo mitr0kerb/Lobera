@@ -20,6 +20,7 @@ import sys
 import os
 import struct
 import socket
+import random
 import time
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,229 +30,198 @@ if _ROOT not in sys.path:
 from core.output import console
 
 
-# ── Constantes SMB ───────────────────────────────────────────────────────────
+# ── Checker MS17-010 — basado en helviojunior/MS17-010/checker.py ─────────────
+#
+# Técnica: conectar SMBv1, hacer tree connect a IPC$, y enviar una transacción
+# TRANS_PEEK_NMPIPE (subcomando 0x23). En un host vulnerable (sin parchear),
+# el servidor responde con NT_STATUS 0xC0000205 (STATUS_INSUFF_SERVER_RESOURCES)
+# en vez de STATUS_OBJECT_NAME_NOT_FOUND — esa diferencia es el indicador.
+#
+# Referencia: https://github.com/helviojunior/MS17-010/blob/master/checker.py
 
-SMB_PORT = 445
-
-# Negociación SMB1
-NEGOTIATE_PROTOCOL_REQUEST = (
-    b"\x00\x00\x00\x85"  # NetBIOS length
-    b"\xff\x53\x4d\x42"  # SMB magic
-    b"\x72"              # Negotiate Protocol
-    b"\x00\x00\x00\x00"
-    b"\x18\x53\xc8\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xfe"
-    b"\x00\x00\x00\x00"
-    b"\x62\x00"          # Byte count
-    b"\x02\x50\x43\x20\x4e\x45\x54\x57\x4f\x52\x4b\x20\x50\x52\x4f\x47\x52\x41\x4d\x20\x31\x2e\x30\x00"
-    b"\x02\x4c\x41\x4e\x4d\x41\x4e\x31\x2e\x30\x00"
-    b"\x02\x57\x69\x6e\x64\x6f\x77\x73\x20\x66\x6f\x72\x20\x57\x6f\x72\x6b\x67\x72\x6f\x75\x70\x73\x20\x33\x2e\x31\x61\x00"
-    b"\x02\x4c\x4d\x31\x2e\x32\x58\x30\x30\x32\x00"
-    b"\x02\x4c\x41\x4e\x4d\x41\x4e\x32\x2e\x31\x00"
-    b"\x02\x4e\x54\x20\x4c\x4d\x20\x30\x2e\x12\x00"
-    b"\x02\x53\x4d\x42\x20\x32\x2e\x30\x30\x32\x00"
-    b"\x02\x53\x4d\x42\x20\x32\x2e\x3f\x3f\x3f\x00"
-)
-
-# Session Setup AnonymousAuthentication SMB1
-SESSION_SETUP_REQUEST = (
-    b"\x00\x00\x00\x63"
-    b"\xff\x53\x4d\x42"
-    b"\x73"
-    b"\x00\x00\x00\x00"
-    b"\x18\x07\xc0\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xfe"
-    b"\x00\x00\x40\x00"
-    b"\x0d\xff\x00\x00\x00\xff\xff\x02\x00\x01\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x26\x00"
-    b"\x00"
-    b"\x2e\x00\x57\x69\x6e\x64\x6f\x77\x73\x20\x32\x30\x30\x30\x20\x32"
-    b"\x31\x39\x35\x00\x57\x69\x6e\x64\x6f\x77\x73\x20\x32\x30\x30\x30"
-    b"\x20\x35\x2e\x30\x00"
-)
-
-# Tree Connect a IPC$ — se rellena con IP real
-TREE_CONNECT_TEMPLATE = (
-    b"\x00\x00\x00\x49"
-    b"\xff\x53\x4d\x42"
-    b"\x75"
-    b"\x00\x00\x00\x00"
-    b"\x18\x07\xc0\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xfe"
-    b"\x00\x08\x40\x00"
-    b"\x04\xff\x00\x00\x00\x00\x00\x01\x00\x1a\x00"
-    b"\x00"
-)
-
-# PeekNamedPipe transaction — dispara la fuga de info del pool
-TRANS2_REQUEST = (
-    b"\x00\x00\x00\xc0"
-    b"\xff\x53\x4d\x42"
-    b"\x25"
-    b"\x00\x00\x00\x00"
-    b"\x18\x01\x28\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xfe"
-    b"\x00\x08\x00\x00"
-    b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x4b\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x4b\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-)
-
-
-# ── Helpers de red ────────────────────────────────────────────────────────────
-
-def _recv_all(sock, length, timeout=5):
-    sock.settimeout(timeout)
-    data = b""
-    while len(data) < length:
-        chunk = sock.recv(length - len(data))
-        if not chunk:
-            break
-        data += chunk
-    return data
-
-
-def _smb_connect(target, port, timeout=5):
-    """Abre socket TCP y negocia SMB1."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect((target, int(port)))
-
-    # Recibir banner NetBIOS
-    sock.recv(4)
-
-    # Negotiate Protocol
-    sock.send(NEGOTIATE_PROTOCOL_REQUEST)
-    neg_resp = _recv_all(sock, 4)
-    length = struct.unpack(">I", neg_resp)[0]
-    _recv_all(sock, length)
-
-    # Session Setup (anónimo)
-    sock.send(SESSION_SETUP_REQUEST)
-    setup_resp = _recv_all(sock, 4)
-    length = struct.unpack(">I", setup_resp)[0]
-    resp = _recv_all(sock, length)
-
-    # Extraer UID de la respuesta
-    uid = struct.unpack("<H", resp[32:34])[0]
-    return sock, uid
-
-
-def _tree_connect(sock, uid, target):
-    """Tree Connect a target IPC$ para poder hacer TRANS2."""
-    path = f"\\\\{target}\\IPC$".encode("utf-16-le")
-    req = bytearray(TREE_CONNECT_TEMPLATE)
-    # Parchear UID
-    struct.pack_into("<H", req, 32, uid)
-    # Añadir path
-    req += struct.pack("<H", len(path) + 2)
-    req += path + b"\x00\x00"
-    # Actualizar longitud NetBIOS
-    struct.pack_into(">I", req, 0, len(req) - 4)
-
-    sock.send(bytes(req))
-    hdr = _recv_all(sock, 4)
-    length = struct.unpack(">I", hdr)[0]
-    resp = _recv_all(sock, length)
-
-    tid = struct.unpack("<H", resp[28:30])[0]
-    return tid
-
-
-def _peek_named_pipe(sock, uid, tid):
-    """Envía TRANS2 PeekNamedPipe — la respuesta revela si hay fuga de pool."""
-    req = bytearray(TRANS2_REQUEST)
-    struct.pack_into("<H", req, 32, uid)
-    struct.pack_into("<H", req, 28, tid)
-    sock.send(bytes(req))
-
-    hdr = _recv_all(sock, 4)
-    if len(hdr) < 4:
-        return None
-    length = struct.unpack(">I", hdr)[0]
-    resp = _recv_all(sock, length)
-    return resp
-
-
-# ── Checker MS17-010 ──────────────────────────────────────────────────────────
-
-def check_ms17010(target, port=445, timeout=5):
+def check_ms17010(target, port=445, timeout=10):
     """
-    Comprueba si el objetivo es vulnerable a MS17-010 usando impacket.
+    Comprueba si el objetivo es vulnerable a MS17-010.
 
     Devuelve:
-      True   — vulnerable
+      True   — vulnerable (STATUS_INSUFF_SERVER_RESOURCES recibido)
       False  — parcheado o SMBv1 desactivado
-      None   — no se pudo conectar / error
+      None   — no se pudo conectar / error indeterminado
     """
     try:
-        from impacket.smbconnection import SMBConnection
-        from impacket import smb as impacket_smb
-        from impacket.smb import SMB_DIALECT
+        from impacket import smb as impacket_smb, nt_errors
+        from impacket import smbconnection
+        from struct import pack
     except ImportError:
         console.print("  [red]Falta impacket — pip install impacket[/red]")
         return None
 
+    # Parchear NewSMBPacket con getNTStatus si no existe ya
+    # (mismo parche que hace helviojunior/MS17-010/mysmb.py)
+    if not hasattr(impacket_smb.NewSMBPacket, 'getNTStatus'):
+        def _getNTStatus(self):
+            return (self['ErrorCode'] << 16) | (self['_reserved'] << 8) | self['ErrorClass']
+        setattr(impacket_smb.NewSMBPacket, 'getNTStatus', _getNTStatus)
+
+    # ── clase MYSMB inlineada ─────────────────────────────────────────────────
+    # Adaptada de helviojunior/MS17-010/mysmb.py para no requerir fichero externo
+
+    def _put_trans_data(transCmd, parameters, data, noPad=False):
+        transCmd['Parameters']['ParameterOffset'] = 0
+        transCmd['Parameters']['DataOffset'] = 0
+        offset = 32 + 1 + len(transCmd['Parameters']) + 2
+        transData = b''
+        if len(parameters):
+            padLen = 0 if noPad else (4 - offset % 4) % 4
+            transCmd['Parameters']['ParameterOffset'] = offset + padLen
+            transData = (b'\x00' * padLen) + parameters
+            offset += padLen + len(parameters)
+        if len(data):
+            padLen = 0 if noPad else (4 - offset % 4) % 4
+            transCmd['Parameters']['DataOffset'] = offset + padLen
+            transData += (b'\x00' * padLen) + data
+        transCmd['Data'] = transData
+
+    class _MYSMB(impacket_smb.SMB):
+        def __init__(self, remote_host, remote_port=445, timeout=8):
+            self._default_tid = 0
+            self._pid = os.getpid() & 0xffff
+            self._last_mid = random.randint(1000, 20000)
+            self._pkt_flags2 = 0
+            self._last_tid = 0
+            self._last_fid = 0
+            impacket_smb.SMB.__init__(self, remote_host, remote_host,
+                                      sess_port=remote_port, timeout=timeout)
+
+        def neg_session(self, extended_security=True, negPacket=None):
+            # Forzar SMBv1 sin NTLM extendido
+            impacket_smb.SMB.neg_session(self, extended_security=False, negPacket=negPacket)
+
+        def next_mid(self):
+            self._last_mid += random.randint(1, 20)
+            return self._last_mid
+
+        def create_smb_packet(self, smbReq, mid=None, pid=None, tid=None):
+            if mid is None:
+                mid = self.next_mid()
+            pkt = impacket_smb.NewSMBPacket()
+            pkt.addCommand(smbReq)
+            pkt['Tid'] = self._default_tid if tid is None else tid
+            pkt['Uid'] = getattr(self, '_uid', 0)
+            pkt['Pid'] = self._pid if pid is None else pid
+            pkt['Mid'] = mid
+            try:
+                flags1, flags2 = self.get_flags()
+            except Exception:
+                flags1, flags2 = 0x18, 0x4001
+            pkt['Flags1'] = flags1
+            pkt['Flags2'] = self._pkt_flags2 if self._pkt_flags2 != 0 else flags2
+            req = pkt.getData()
+            return b'\x00\x00' + pack('>H', len(req)) + req
+
+        def send_raw(self, data):
+            self.get_socket().send(data)
+
+        def create_trans_packet(self, setup, param=b'', data=b'', mid=None,
+                                maxParameterCount=None, maxDataCount=None,
+                                pid=None, tid=None, noPad=False):
+            if maxParameterCount is None:
+                maxParameterCount = len(param)
+            if maxDataCount is None:
+                maxDataCount = len(data)
+            transCmd = impacket_smb.SMBCommand(impacket_smb.SMB.SMB_COM_TRANSACTION)
+            transCmd['Parameters'] = impacket_smb.SMBTransaction_Parameters()
+            transCmd['Parameters']['TotalParameterCount'] = len(param)
+            transCmd['Parameters']['TotalDataCount'] = len(data)
+            transCmd['Parameters']['MaxParameterCount'] = maxParameterCount
+            transCmd['Parameters']['MaxDataCount'] = maxDataCount
+            transCmd['Parameters']['MaxSetupCount'] = len(setup) // 2
+            transCmd['Parameters']['Flags'] = 0
+            transCmd['Parameters']['Timeout'] = 0xffffffff
+            transCmd['Parameters']['ParameterCount'] = len(param)
+            transCmd['Parameters']['DataCount'] = len(data)
+            transCmd['Parameters']['Setup'] = setup
+            _put_trans_data(transCmd, param, data, noPad)
+            return self.create_smb_packet(transCmd, mid, pid, tid)
+
+        def send_trans(self, setup, param=b'', data=b'', mid=None,
+                       maxParameterCount=None, maxDataCount=None,
+                       pid=None, tid=None, noPad=False):
+            self.send_raw(self.create_trans_packet(
+                setup, param, data, mid, maxParameterCount, maxDataCount,
+                pid, tid, noPad))
+            return self.recvSMB()
+
+        def connect_tree(self, path, password=None,
+                         service=impacket_smb.SERVICE_ANY, smb_packet=None):
+            self._last_tid = impacket_smb.SMB.tree_connect_andx(
+                self, path, password, service, smb_packet)
+            return self._last_tid
+
+        def set_default_tid(self, tid):
+            self._default_tid = tid
+
+    # ── lógica de detección ───────────────────────────────────────────────────
+
+    TRANS_PEEK_NMPIPE = 0x23
+
     try:
-        # Conectar forzando SMBv1
-        conn = SMBConnection(target, target, sess_port=int(port),
-                             preferredDialect=SMB_DIALECT, timeout=timeout)
-        conn.login("", "")  # sesión anónima
-
-        # Obtener el transporte SMB interno
-        smb_client = conn.getSMBServer()
-
-        # Intentar abrir una named pipe inexistente via TRANS2
-        # Si el servidor es vulnerable devuelve STATUS_INSUFF_SERVER_RESOURCES
-        # en vez de STATUS_OBJECT_NAME_NOT_FOUND
-        tid = conn.connectTree("IPC$")
-
-        # Enviar TRANS2_FIND_FIRST2 con parámetros que provocan el pool leak
-        # impacket expone el transporte raw para esto
-        trans = smb_client.Trans2(
-            smb_client,
-            "",
-            impacket_smb.SMB.TRANS2_FIND_FIRST2,
-            b"\x00" * 12,
-            b""
-        )
-
-        # Si llegamos aquí sin excepción con STATUS_INSUFF_SERVER_RESOURCES → vulnerable
-        conn.disconnectTree(tid)
-        conn.logoff()
-        return False
-
+        conn = _MYSMB(target, int(port), timeout=timeout)
     except Exception as e:
         err = str(e)
-        # STATUS_INSUFF_SERVER_RESOURCES = pool leak = vulnerable
-        if "STATUS_INSUFF_SERVER_RESOURCES" in err or "0xc0000205" in err.lower():
-            return True
-        # Errores de autenticación o acceso = SMBv1 activo pero parcheado
-        elif any(x in err for x in ("STATUS_ACCESS_DENIED", "STATUS_LOGON_FAILURE",
-                                     "STATUS_NOT_IMPLEMENTED", "STATUS_INVALID_PARAMETER")):
-            return False
-        # Sin conexión
-        elif any(x in err for x in ("timed out", "Connection refused", "No route")):
+        if any(x in err.lower() for x in ("timed out", "connection refused",
+                                           "no route", "network unreachable",
+                                           "errno 111", "errno 110")):
             return None
-        else:
-            # Cualquier otro error SMB — intentar determinar por el dialect
-            try:
-                from impacket.smbconnection import SMBConnection
-                from impacket.smb import SMB_DIALECT
-                conn2 = SMBConnection(target, target, sess_port=int(port), timeout=timeout)
-                # Si negocia SMBv1 y llega aquí sin pool leak → parcheado
-                conn2.logoff()
-                return False
-            except Exception:
-                return None
+        return None
+
+    try:
+        conn.login('', '')
+    except impacket_smb.SessionError as e:
+        # Login fallido — pero puede que igual podamos hacer el TRANS
+        # Algunos sistemas responden con error de login pero aun así son detectables
+        pass
+    except Exception:
+        pass
+
+    try:
+        tid = conn.connect_tree('\\\\' + target + '\\' + 'IPC$')
+        conn.set_default_tid(tid)
+    except Exception:
+        try:
+            conn.get_socket().close()
+        except Exception:
+            pass
+        return None
+
+    try:
+        recvPkt = conn.send_trans(pack('<H', TRANS_PEEK_NMPIPE),
+                                  maxParameterCount=0xffff,
+                                  maxDataCount=0x800)
+        # getNTStatus() está parcheado en mysmb.py sobre NewSMBPacket
+        # En impacket estándar usamos el campo directamente
+        status = recvPkt.getNTStatus()
+    except Exception as e:
+        err = str(e)
+        # A veces el status llega como excepción SMB con el código embebido
+        if '0xc0000205' in err.lower() or 'insuff_server' in err.lower():
+            return True
+        try:
+            conn.get_socket().close()
+        except Exception:
+            pass
+        return None
+
+    try:
+        conn.get_socket().close()
+    except Exception:
+        pass
+
+    # STATUS_INSUFF_SERVER_RESOURCES (0xC0000205) = vulnerable sin parchear
+    if status == 0xC0000205:
+        return True
+    else:
+        return False
 
 
 def run_check(target, port, timeout):
