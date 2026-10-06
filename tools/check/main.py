@@ -295,7 +295,7 @@ def _build_mysmb_class():
             return tid
 
         def disconnect_tree(self, tid):
-            impacket_smb.SMB.tree_disconnect(self, tid)
+            impacket_smb.SMB.disconnect_tree(self, tid)
 
     return MYSMB
 
