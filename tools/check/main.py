@@ -146,7 +146,7 @@ def _smb_connect(target, port, timeout=5):
 
 
 def _tree_connect(sock, uid, target):
-    """Tree Connect a \\target\IPC$ para poder hacer TRANS2."""
+    """Tree Connect a target IPC$ para poder hacer TRANS2."""
     path = f"\\\\{target}\\IPC$".encode("utf-16-le")
     req = bytearray(TREE_CONNECT_TEMPLATE)
     # Parchear UID
