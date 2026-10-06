@@ -359,8 +359,57 @@ def build_parser():
 
 
 def _banner():
-    console.print("[bold cyan]lobera-spray[/bold cyan] [dim]— Sprayer multiprotocolo con anti-lockout[/dim]")
-    console.print("[dim]Autor: mitr0kerb | parte de la suite Lobera[/dim]\n")
+    from tools.common import banner, panel_info, tabla_modos, tabla_flags, ejemplos
+
+    banner("lobera-spray  —  Sprayer multiprotocolo con anti-lockout")
+
+    tabla_modos([
+        ("smb",   "Autenticación NTLM contra SMB  (puerto 445)"),
+        ("winrm", "Autenticación NTLM contra WinRM  (5985 HTTP / 5986 HTTPS)"),
+        ("ssh",   "Autenticación SSH por contraseña o clave privada"),
+        ("ldap",  "Bind NTLM contra LDAP/LDAPS  (389 / 636)"),
+        ("all",   "Prueba los cuatro protocolos en orden"),
+    ])
+
+    tabla_flags([
+        ("-t / --target",   "IP",   "IP o hostname del objetivo"),
+        ("-u / --user",     "str",  "Usuario único"),
+        ("-U / --user-file","file", "Fichero de usuarios  (uno por línea)"),
+        ("-p / --password", "str",  "Contraseña única"),
+        ("-P / --pass-file","file", "Fichero de contraseñas  (uno por línea)"),
+        ("-d / --domain",   "FQDN", "Dominio  (ej: CORP.LOCAL)"),
+        ("--delay",         "float","Segundos entre intentos  (default: 1)"),
+        ("--jitter",        "float","Variación aleatoria adicional  (default: 0)"),
+        ("--rounds",        "int",  "Intentos por ronda antes de pausar  (default: sin límite)"),
+        ("--pause",         "int",  "Segundos de pausa entre rondas  (default: 300)"),
+        ("--output",        "file", "Guardar credenciales válidas"),
+        ("--ssl",           "flag", "Forzar SSL/TLS  (LDAPS, WinRM HTTPS)"),
+        ("--key-file",      "file", "Clave privada SSH  (modo ssh)"),
+    ], titulo="Opciones comunes")
+
+    panel_info("⚠  Anti-lockout", [
+        "El spray puede bloquear cuentas si la política de dominio es estricta.",
+        "Recomendación: [bold]--delay 30 --jitter 10 --rounds 1 --pause 1800[/bold]",
+        "Esto hace 1 intento por usuario, pausa 30 min entre contraseñas.",
+        "Consulta la política de bloqueo antes de lanzar: [bold]lobera ldap -t DC -u user -p pass -d DOM --script enum/password_policy[/bold]",
+    ])
+
+    ejemplos([
+        "# Spray SMB con lista de usuarios y contraseñas, anti-lockout básico",
+        "lobera-spray smb -t 10.10.10.5 -U users.txt -P passwords.txt -d CORP.LOCAL --delay 2 --jitter 1",
+        "",
+        "# Un usuario, varias contraseñas contra WinRM",
+        "lobera-spray winrm -t 10.10.10.5 -u administrador -P rockyou_top100.txt -d CORP.LOCAL",
+        "",
+        "# SSH con clave privada",
+        "lobera-spray ssh -t 10.10.10.5 -U users.txt --key-file id_rsa",
+        "",
+        "# LDAP con pausa entre rondas  (1 pass/ronda, 30 min entre rondas)",
+        "lobera-spray ldap -t 10.10.10.5 -U users.txt -P passes.txt -d CORP.LOCAL --rounds 1 --pause 1800",
+        "",
+        "# Todos los protocolos de una vez",
+        "lobera-spray all -t 10.10.10.5 -u admin -p 'Winter2024!' -d CORP.LOCAL",
+    ])
 
 
 def _advertencia_lockout():
@@ -375,9 +424,10 @@ def main():
     _banner()
 
     if not args.proto:
-        parser.print_help()
+        _banner()
         return
 
+    _banner()
     _advertencia_lockout()
 
     # Cargar listas

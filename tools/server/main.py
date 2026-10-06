@@ -206,13 +206,49 @@ def build_parser():
 
 
 def _banner():
-    console.print("[bold cyan]lobera-server[/bold cyan] [dim]— SMB/HTTP server para red team[/dim]")
-    console.print("[dim]Autor: mitr0kerb | parte de la suite Lobera[/dim]\n")
+    from tools.common import banner, tabla_modos, tabla_flags, ejemplos
+
+    banner("lobera-server  —  SMB/HTTP server para red team")
+
+    tabla_modos([
+        ("smb",  "Servidor SMB falso que captura hashes NTLMv2 de cualquier conexión entrante"),
+        ("http", "Servidor HTTP simple para servir payloads, ficheros o shells"),
+        ("both", "SMB + HTTP simultáneos en hilos independientes"),
+    ])
+
+    tabla_flags([
+        ("--ip",        "str",  "IP de escucha (default: 0.0.0.0 — todas las interfaces)"),
+        ("--port",      "int",  "Puerto del servidor (SMB: 445, HTTP: 80)"),
+        ("--smb-port",  "int",  "Puerto SMB en modo 'both' (default: 445)"),
+        ("--http-port", "int",  "Puerto HTTP en modo 'both' (default: 80)"),
+        ("--dir",       "path", "Directorio a compartir/servir"),
+        ("--share",     "str",  "Nombre del share SMB (default: share)"),
+        ("--output",    "file", "Fichero donde guardar los hashes NTLMv2 capturados"),
+    ], titulo="Opciones")
+
+    ejemplos([
+        "# Capturar hashes NTLMv2 — apunta víctimas a \\\\TU_IP\\share",
+        "lobera-server smb --ip 0.0.0.0 --port 445 --output hashes.txt",
+        "",
+        "# Servir payloads por HTTP",
+        "lobera-server http --ip 0.0.0.0 --port 80 --dir /tmp/payloads",
+        "",
+        "# Ambos simultáneos (requiere sudo para puertos < 1024)",
+        "lobera-server both --ip 0.0.0.0 --smb-port 445 --http-port 8080 --dir /tmp/srv --output hashes.txt",
+        "",
+        "# Sin permisos root — puertos altos",
+        "lobera-server smb --ip 0.0.0.0 --port 8445 --output hashes.txt",
+    ])
 
 
 def main():
     parser = build_parser()
     args   = parser.parse_args()
+
+    if not args.mode:
+        _banner()
+        parser.print_help()
+        return
 
     _banner()
 
@@ -233,3 +269,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -335,8 +335,46 @@ def build_parser():
 
 
 def _banner():
-    console.print("[bold cyan]lobera-watch[/bold cyan] [dim]— Monitor de eventos AD en tiempo real[/dim]")
-    console.print("[dim]Autor: mitr0kerb | parte de la suite Lobera[/dim]\n")
+    from tools.common import banner, panel_info, tabla_flags, ejemplos
+
+    banner("lobera-watch  —  Monitor de eventos AD en tiempo real")
+
+    panel_info("Qué detecta", [
+        "[bold green]+[/bold green] Nuevos usuarios creados en el dominio",
+        "[bold yellow]~[/bold yellow] Cambios de contraseña  (pwdLastSet)",
+        "[bold red]![/bold red] Cuentas bloqueadas  (lockoutTime)",
+        "[bold red]!![/bold red] Cambios de membresía en grupos privilegiados  (DA · EA · Admins...)",
+        "[bold cyan]+[/bold cyan] Nuevos equipos unidos al dominio",
+        "[bold yellow]~[/bold yellow] GPOs creadas o modificadas",
+        "[bold magenta]*[/bold magenta] SPNs añadidos  → cuenta Kerberoastable",
+        "[bold magenta]*[/bold magenta] Delegaciones configuradas o modificadas",
+    ])
+
+    tabla_flags([
+        ("-t / --target",   "IP",   "IP o hostname del Domain Controller"),
+        ("-u / --user",     "str",  "Usuario de dominio"),
+        ("-p / --password", "str",  "Contraseña"),
+        ("-H / --hash",     "str",  "Hash NT para pass-the-hash  (formato LM:NT o :NT)"),
+        ("-d / --domain",   "FQDN", "Dominio  (ej: CORP.LOCAL)"),
+        ("--interval",      "int",  "Segundos entre comprobaciones  (default: 60)"),
+        ("--filter",        "list", "Categorías a monitorizar: users,groups,computers,gpos"),
+        ("--output",        "file", "Guardar eventos en fichero de log"),
+        ("--ssl",           "flag", "Usar LDAPS en lugar de LDAP  (puerto 636)"),
+    ], titulo="Opciones")
+
+    ejemplos([
+        "# Monitorizar todo con intervalo de 30 segundos",
+        "lobera-watch -t 10.10.10.5 -u administrador -p 'P@ss123' -d CORP.LOCAL --interval 30",
+        "",
+        "# Solo usuarios y lockouts, con log",
+        "lobera-watch -t 10.10.10.5 -u svc_audit -p 'P@ss' -d CORP.LOCAL --filter users --output eventos.log",
+        "",
+        "# Pass-the-hash",
+        "lobera-watch -t 10.10.10.5 -u admin -H :aad3b435b51404eeaad3b435b51404ee -d CORP.LOCAL",
+        "",
+        "# Solo cambios en grupos privilegiados",
+        "lobera-watch -t 10.10.10.5 -u auditor -p 'P@ss' -d CORP.LOCAL --filter groups --interval 10",
+    ])
 
 
 def main():

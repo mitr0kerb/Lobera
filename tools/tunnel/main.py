@@ -432,20 +432,71 @@ def build_parser():
 
 
 def _banner():
-    console.print("[bold cyan]lobera-tunnel[/bold cyan] [dim]— Túnel SOCKS5 y port-forwarding sobre SSH[/dim]")
-    console.print("[dim]Autor: mitr0kerb | parte de la suite Lobera[/dim]\n")
+    from tools.common import banner, panel_info, tabla_modos, tabla_flags, ejemplos
+
+    banner("lobera-tunnel  —  Pivoting y túneles sobre SSH")
+
+    tabla_modos([
+        ("socks5",  "Proxy SOCKS5 local sobre SSH dinámico  (equivalente a ssh -D)"),
+        ("forward", "Reenvío de puerto local → remoto  (equivalente a ssh -L)"),
+        ("reverse", "Reenvío de puerto remoto → local  (equivalente a ssh -R)"),
+        ("multi",   "Varios túneles simultáneos desde fichero YAML"),
+    ])
+
+    tabla_flags([
+        ("-t / --target",    "IP",   "IP o hostname del salto SSH"),
+        ("-u / --user",      "str",  "Usuario SSH"),
+        ("-p / --password",  "str",  "Contraseña SSH"),
+        ("--key-file",       "file", "Clave privada SSH"),
+        ("--ssh-port",       "int",  "Puerto SSH  (default: 22)"),
+        ("--local-ip",       "IP",   "IP local donde escuchar  (default: 127.0.0.1)"),
+        ("--local-port",     "int",  "Puerto local"),
+        ("--remote-host",    "IP",   "Host destino en la red remota  (modo forward)"),
+        ("--remote-port",    "int",  "Puerto en la red remota"),
+        ("--local-host",     "IP",   "Host local al que reenviar  (modo reverse, default: 127.0.0.1)"),
+        ("--config",         "file", "Fichero YAML con lista de túneles  (modo multi)"),
+    ], titulo="Opciones")
+
+    panel_info("Configuración YAML para modo multi", [
+        "- type: socks5",
+        "  local_port: 1080",
+        "",
+        "- type: forward",
+        "  local_port: 8080",
+        "  remote_host: 192.168.1.10",
+        "  remote_port: 80",
+        "",
+        "- type: reverse",
+        "  remote_port: 4444",
+        "  local_port: 4444",
+        "  local_host: 127.0.0.1",
+    ])
+
+    ejemplos([
+        "# Proxy SOCKS5 en 127.0.0.1:1080 — usa con proxychains",
+        "lobera-tunnel socks5 -t 10.10.10.5 -u user -p 'P@ss' --local-port 1080",
+        "proxychains nmap -sV 192.168.1.0/24",
+        "",
+        "# Acceder a RDP interno (192.168.1.10:3389) desde tu máquina en :13389",
+        "lobera-tunnel forward -t 10.10.10.5 -u user -p 'P@ss' --local-port 13389 --remote-host 192.168.1.10 --remote-port 3389",
+        "",
+        "# Recibir shell reversa del objetivo en tu máquina  (víctima → pivot:4444 → tú:4444)",
+        "lobera-tunnel reverse -t 10.10.10.5 -u user -p 'P@ss' --remote-port 4444 --local-port 4444",
+        "",
+        "# Varios túneles a la vez desde YAML",
+        "lobera-tunnel multi -t 10.10.10.5 -u user -p 'P@ss' --config tunnels.yaml",
+    ])
 
 
 def main():
     parser = build_parser()
     args   = parser.parse_args()
 
-    _banner()
-
     if not args.mode:
-        parser.print_help()
+        _banner()
         return
 
+    _banner()
     console.print(f"  [bold]Salto SSH:[/bold]  {args.user}@{args.target}:{args.ssh_port}")
 
     try:
