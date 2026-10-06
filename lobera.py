@@ -552,15 +552,25 @@ def _add_proto_flags(p):
 
     # ── Pass-the-Hash / lateral movement ─────────────────────────────────────
     p.add_argument("--exec",           default=None,
-                   help="Comando a ejecutar (pass-the-hash, dcom-exec)")
+                   help="Comando a ejecutar (pass-the-hash, dcom-exec, persistencia)")
     p.add_argument("--shell",          action="store_true", default=False,
                    help="Modo shell interactivo (pass-the-hash)")
     p.add_argument("--method",         default=None,
-                   choices=["smbexec", "wmiexec", "atexec"],
-                   help="Método de ejecución PtH (default: smbexec)")
+                   help="Método: smbexec|wmiexec|atexec (PtH) · schtask|registry|wmi-sub|startup|service (persistencia)")
     p.add_argument("--object",         default=None,
                    choices=["MMC20", "ShellWindows", "ShellBrowserWindow"],
                    help="Objeto DCOM para dcom-exec (default: MMC20)")
+
+    # ── Persistencia ──────────────────────────────────────────────────────────
+    p.add_argument("--persist-name",   default="WindowsUpdate", dest="persist_name",
+                   help="Nombre del artefacto de persistencia (tarea, clave, servicio)")
+    p.add_argument("--hive",           default="HKLM", choices=["HKLM", "HKCU"],
+                   help="Hive de registro para método registry (default: HKLM)")
+    p.add_argument("--trigger",        default="logon",
+                   choices=["logon", "startup", "hourly", "daily"],
+                   help="Trigger para schtask (default: logon)")
+    p.add_argument("--local-file",     default=None, dest="local_file",
+                   help="Ruta al archivo local para subir (método startup)")
 
     # ── DCSync ────────────────────────────────────────────────────────────────
     p.add_argument("--dc-user",        default=None, dest="dc_user",
