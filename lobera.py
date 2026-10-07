@@ -17,7 +17,7 @@ def show_banner():
     art = pyfiglet.figlet_format("LOBERA", font="slant")
     console.print(f"[bold cyan]{art}[/bold cyan]")
     console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan · Listen · AMSI[/dim]")
-    console.print("[dim]  v1.0 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
+    console.print("[dim]  v0.2 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
 # ── Tablas de shells / scanners ───────────────────────────────────────────────
 

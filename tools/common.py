@@ -16,7 +16,7 @@ from rich.table import Table
 from rich import box
 
 
-def banner(subtitulo: str, version: str = "1.0"):
+def banner(subtitulo: str, version: str = "0.2"):
     """Imprime el logo ASCII de Lobera + subtítulo de la herramienta."""
     try:
         import pyfiglet
