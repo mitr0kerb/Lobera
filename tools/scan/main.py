@@ -254,7 +254,11 @@ def _banner_tool():
 
 
 def main():
+    import sys
     init_db()
+    if not sys.argv[1:]:
+        _banner_tool()
+        return
     parser = build_parser()
     args   = parser.parse_args()
 

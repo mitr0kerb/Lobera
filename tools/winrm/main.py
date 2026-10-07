@@ -178,8 +178,29 @@ def build_parser():
     return parser
 
 
+def _banner():
+    from tools.common import banner, tabla_modos, ejemplos
+    banner("lobera-winrm  —  Operaciones WinRM / PowerShell Remoting")
+    tabla_modos([
+        ("check", "Verificar acceso WinRM con credenciales"),
+        ("exec",  "Ejecutar comando remoto vía WinRM"),
+        ("spray", "Password spray contra WinRM"),
+        ("shell", "Shell interactiva WinRM/PowerShell"),
+    ])
+    ejemplos([
+        "lobera-winrm check  -t 10.10.10.5 -u Administrator -p Pass123",
+        "lobera-winrm exec   -t 10.10.10.5 -u Administrator -p Pass123 -c whoami",
+        "lobera-winrm spray  -t 10.10.10.5 -u Administrator -P passwords.txt",
+        "lobera-winrm shell  -t 10.10.10.5 -u Administrator -p Pass123",
+    ])
+
+
 def main():
+    import sys
     init_db()
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args = parser.parse_args()
     try:

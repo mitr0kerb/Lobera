@@ -254,8 +254,29 @@ def build_parser():
     return parser
 
 
+def _banner():
+    from tools.common import banner, tabla_modos, ejemplos
+    banner("lobera-smb  —  Operaciones SMB / Active Directory")
+    tabla_modos([
+        ("enum",  "Enumeración SMB — shares, usuarios, OS, sesiones, signing"),
+        ("spray", "Password spray contra SMB"),
+        ("exec",  "Ejecución remota de comandos vía SMB"),
+        ("shell", "Shell interactiva SMB"),
+    ])
+    ejemplos([
+        "lobera-smb enum  -t 10.10.10.5 --shares --users",
+        "lobera-smb spray -t 10.10.10.5 -u admin -P passwords.txt",
+        "lobera-smb exec  -t 10.10.10.5 -u admin -p Pass123 --cmd whoami",
+        "lobera-smb shell -t 10.10.10.5 -u admin -p Pass123",
+    ])
+
+
 def main():
+    import sys
     init_db()
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args = parser.parse_args()
 

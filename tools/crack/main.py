@@ -522,12 +522,29 @@ def build_parser():
 
 
 def _banner():
-    console.print()
-    console.print("  [bold cyan]lobera-crack[/bold cyan]  —  Cracker offline de hashes Windows/AD")
-    console.print()
+    from tools.common import banner, tabla_flags, ejemplos
+    banner("lobera-crack  —  Cracker offline de hashes Windows/AD")
+    tabla_flags([
+        ("-H / --hash",    "str",  "Hash individual a crackear"),
+        ("-f / --file",    "file", "Fichero con un hash por línea"),
+        ("--from-db",      "flag", "Leer hashes sin crackear de la BD de sesión"),
+        ("-w / --wordlist", "file", "Diccionario (obligatorio)"),
+        ("--format",       "str",  "ntlm | netntlmv1 | netntlmv2 | krb5asrep | krb5tgs"),
+        ("--engine",       "str",  "auto | hashcat | cpu (default: auto)"),
+        ("-r / --rules",   "file", "Fichero de reglas hashcat"),
+    ])
+    ejemplos([
+        "lobera-crack -H aad3b435b51404eeaad3b435b51404ee:... -w rockyou.txt",
+        "lobera-crack -f hashes.txt -w rockyou.txt --format netntlmv2",
+        "lobera-crack --from-db -w rockyou.txt --engine hashcat",
+    ])
 
 
 def main():
+    import sys
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args = parser.parse_args()
     _banner()
