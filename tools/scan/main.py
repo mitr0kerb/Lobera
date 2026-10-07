@@ -265,7 +265,6 @@ def main():
     ips     = _expandir_ips(args.target)
     puertos = _expandir_puertos(args.ports)
 
-    _banner_tool()
     console.print(f"[cyan]Escaneando {len(ips)} host(s) — {len(puertos)} puerto(s) — "
                   f"{args.threads} hilos — timeout {args.timeout}ms[/cyan]\n")
 

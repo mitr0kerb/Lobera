@@ -272,8 +272,6 @@ def main():
         parser.print_help()
         return
 
-    _banner()
-
     if args.mode == "smb":
         run_smb_server(args.ip, args.port, args.output,
                        args.share, args.dir,

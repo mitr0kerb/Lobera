@@ -547,7 +547,6 @@ def main():
         return
     parser = build_parser()
     args = parser.parse_args()
-    _banner()
 
     hc = _find_hashcat()
     console.print(f"  hashcat: {'[green]disponible[/green]' if hc else '[yellow]no encontrado — se usará CPU[/yellow]'}")

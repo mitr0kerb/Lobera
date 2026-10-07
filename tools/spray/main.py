@@ -418,16 +418,17 @@ def _advertencia_lockout():
 
 
 def main():
+    import sys
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args   = parser.parse_args()
-
-    _banner()
 
     if not args.proto:
         _banner()
         return
 
-    _banner()
     _advertencia_lockout()
 
     # Cargar listas
