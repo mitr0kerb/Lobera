@@ -199,32 +199,18 @@ def run_mssql(args):    _run_proto("mssql",    args)
 
 
 def run_exploit(args):
-    """Dispatcher para módulos de explotación (C binaries + Python wrappers)."""
-    from core.target import Target
-    from core.credentials import Credentials
-
+    """Redirige a lobera-exploit (binario especializado)."""
     sub = getattr(args, "exploit_module", None)
-    target = Target(ip=getattr(args, "target", "localhost") or "localhost")
-    creds  = Credentials(
-        user=getattr(args, "user", None),
-        password=getattr(args, "password", None),
-        nt_hash=getattr(args, "hash", None),
-        domain=getattr(args, "domain", None),
-    )
 
-    if sub == "shellcode":
-        from scripts.exploits.shellcode_run import Script
-    elif sub == "ms17010":
-        from scripts.exploits.ms17010 import Script
+    if sub == "ms17010":
+        console.print("[cyan]Usa [bold]lobera-check[/bold] para MS17-010 o [bold]lobera-exploit[/bold] para lanzar exploits desde BD.[/cyan]")
+        console.print("[dim]  lobera-check --target IP --port 445[/dim]")
+        console.print("[dim]  lobera-exploit --target IP --vuln MS17-010 --payload cmd --cmd whoami[/dim]")
     else:
-        console.print("[yellow]Módulos de exploit disponibles:[/yellow]")
-        console.print("  [bold]shellcode[/bold]  — ejecuta shellcode en memoria (mmap/VirtualAlloc)")
-        console.print("  [bold]ms17010[/bold]    — EternalBlue checker + exploit (CVE-2017-0144)")
-        console.print("\n[dim]Uso: lobera.py exploit <módulo> --help[/dim]")
-        return
-
-    script = Script(target=target, creds=creds)
-    script.run(args)
+        console.print("[yellow]Usa los binarios especializados:[/yellow]")
+        console.print("  [bold]lobera-check[/bold]    — detecta MS17-010 y otros CVEs")
+        console.print("  [bold]lobera-exploit[/bold]  — lanza exploits (--target+--vuln | --from-db)")
+        console.print("\n[dim]Estos comandos reemplazaron al antiguo 'lobera exploit'.[/dim]")
 
 
 def run_crack(args):
@@ -618,33 +604,10 @@ def build_parser():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
-    # ── exploit (C binaries) ─────────────────────────────────────────────────
-    exp_p = subs.add_parser("exploit", help="Módulos de explotación (shellcode runner, MS17-010…)")
+    # ── exploit (redirige a binarios especializados) ─────────────────────────
+    exp_p = subs.add_parser("exploit", help="→ usa lobera-check / lobera-exploit")
     exp_s = exp_p.add_subparsers(dest="exploit_module", metavar="módulo")
-
-    # shellcode
-    sc_p = exp_s.add_parser("shellcode", help="Ejecuta shellcode en memoria")
-    sc_p.add_argument("-f", "--shellcode-file", dest="shellcode_file", default=None,
-                      help="Fichero raw de shellcode (output de msfvenom -f raw)")
-    sc_p.add_argument("-x", "--shellcode-hex",  dest="shellcode_hex",  default=None,
-                      help="Shellcode como string hex (\\xfc\\x48...)")
-    sc_p.add_argument("--method", default="direct", choices=["direct","thread","fork"],
-                      help="Método de ejecución (default: direct)")
-    sc_p.add_argument("--xor",    dest="xor_key",  default=None,
-                      help="De-ofuscar XOR con byte KEY (ej: 0x41)")
-    sc_p.add_argument("--sleep",  dest="sleep_ms", default=None, type=int,
-                      help="Dormir N ms antes de ejecutar (bypass sandbox)")
-    sc_p.add_argument("--rwx-split", dest="rwx_split", action="store_true",
-                      help="Mapear RW primero, luego RX (evitar W+X simultánea)")
-
-    # ms17010
-    eb_p = exp_s.add_parser("ms17010", help="EternalBlue (CVE-2017-0144) checker/exploit")
-    eb_p.add_argument("-t", "--target",  required=True, help="IP del objetivo")
-    eb_p.add_argument("--port",          default=445, type=int, help="Puerto SMB (default: 445)")
-    eb_p.add_argument("--timeout",       default=3000, type=int, help="Timeout en ms (default: 3000)")
-    eb_p.add_argument("--exploit",       action="store_true", help="Explotar si vulnerable")
-    eb_p.add_argument("--lhost",         default=None, help="IP del atacante (para reverse shell)")
-    eb_p.add_argument("--lport",         default=4444, type=int, help="Puerto listener (default: 4444)")
+    exp_s.add_parser("ms17010", help="→ usa lobera-check --target IP")
 
     # ── crack (Rust binary) ──────────────────────────────────────────────────
     crack_p = subs.add_parser("crack", help="Crackeo offline de hashes Kerberos/NTLM (Rust, multi-core)")
