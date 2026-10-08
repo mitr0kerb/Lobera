@@ -247,17 +247,50 @@ def _limpiar_pantalla():
 
 # ── Input interactivo ─────────────────────────────────────────────────────────
 
+def _rich_a_ansi(markup: str) -> str:
+    """
+    Convierte markup de Rich a una cadena ANSI plana.
+    force_terminal=True para que emita colores aunque stdout no sea TTY.
+    """
+    from io import StringIO
+    from rich.console import Console as _Console
+    buf = StringIO()
+    c = _Console(file=buf, highlight=False, markup=True, force_terminal=True)
+    c.print(markup, end="")
+    return buf.getvalue()
+
+
+def _ansi_para_readline(texto_ansi: str) -> str:
+    """
+    Envuelve cada secuencia de escape ANSI en \\001...\\002 para que
+    readline calcule correctamente el ancho visible del prompt.
+    Sin esto, Ctrl+L redibuja el prompt desplazado hacia la derecha.
+    """
+    import re
+    # Patrón estándar de secuencias de escape ANSI
+    return re.sub(r'(\x1b\[[0-9;]*[mK])', r'\001\1\002', texto_ansi)
+
+
 def _leer_input(prompt_rich: str) -> str:
     """
-    Lee una línea de input usando console.input() de rich.
-    Configura readline para que Ctrl+L llame a 'clear' del SO.
+    Lee una línea de input con readline.
+    - Convierte markup Rich → ANSI → envuelto en \\001\\002
+    - Ctrl+L limpia la pantalla y redibuja el prompt correctamente
+    - Historial de comandos dentro de la sesión
     """
     try:
         import readline
         readline.parse_and_bind(r'"\C-l": clear-screen')
     except ImportError:
         pass
-    return console.input(prompt_rich)
+
+    prompt_ansi = _rich_a_ansi(prompt_rich)
+    prompt_rl   = _ansi_para_readline(prompt_ansi)
+
+    try:
+        return input(prompt_rl)
+    except EOFError:
+        raise
 
 
 # ── Consola principal ─────────────────────────────────────────────────────────
