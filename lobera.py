@@ -55,10 +55,49 @@ _BINS_DISPONIBLES = [
 
 # ── Lectura de scripts disponibles ───────────────────────────────────────────
 
+def _leer_descripcion_script(ruta: Path) -> str:
+    """
+    Extrae la descripción de un script Python. Busca en orden:
+    1. Atributo de clase description = "..."
+    2. Primera línea no vacía del docstring del módulo
+    Devuelve cadena vacía si no encuentra nada.
+    """
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as f:
+            contenido = f.read(4096)
+
+        import ast, re
+
+        # 1) Buscar patrón: description = "texto" o description = ("texto" ...)
+        #    Captura la primera cadena que aparezca tras el signo =
+        m = re.search(r'description\s*=\s*[\(\s]*["\']([^"\']{5,})["\']', contenido)
+        if m:
+            return m.group(1).strip()
+
+        # 2) Fallback: docstring del módulo
+        try:
+            arbol = ast.parse(contenido)
+        except SyntaxError:
+            return ""
+        for nodo in arbol.body:
+            if isinstance(nodo, ast.Expr) and isinstance(nodo.value, ast.Constant):
+                doc = nodo.value.value
+                if isinstance(doc, str):
+                    for linea in doc.splitlines():
+                        linea = linea.strip()
+                        if linea:
+                            return linea
+            break  # sólo primer stmt
+
+    except Exception:
+        pass
+    return ""
+
+
 def _listar_scripts_modulo(modulo: str) -> dict:
     """
-    Busca en scripts/<modulo>/ y devuelve un dict {subcarpeta: [nombres_script]}.
-    Los scripts se muestran sin extensión.
+    Busca en scripts/<modulo>/ y devuelve un dict:
+      {subcarpeta: [(nombre_sin_ext, descripcion), ...]}
     """
     scripts_dir = _ROOT / "scripts" / modulo
     resultado = {}
@@ -73,13 +112,14 @@ def _listar_scripts_modulo(modulo: str) -> dict:
         if entrada.name.startswith("_") or entrada.name == "__pycache__":
             continue
 
-        nombres = []
+        scripts = []
         for fichero in sorted(entrada.iterdir()):
             if fichero.suffix == ".py" and not fichero.name.startswith("_"):
-                nombres.append(fichero.stem)
+                desc = _leer_descripcion_script(fichero)
+                scripts.append((fichero.stem, desc))
 
-        if nombres:
-            resultado[entrada.name] = nombres
+        if scripts:
+            resultado[entrada.name] = scripts
 
     return resultado
 
@@ -103,8 +143,10 @@ def _mostrar_ayuda_principal():
 
   [cyan]use <módulo>[/cyan]     — Entra en la consola del módulo (smb, kerberos, rpc...)
   [cyan]modules[/cyan]          — Lista los módulos disponibles
+  [cyan]clear / cls[/cyan]      — Limpia la pantalla
   [cyan]help[/cyan]             — Muestra esta ayuda
   [cyan]exit / quit[/cyan]      — Sale de Lobera
+  [dim]Ctrl+L[/dim]             — Limpia la pantalla
   [dim]Ctrl+C[/dim]             — Sale de Lobera
 """)
 
@@ -116,10 +158,12 @@ def _mostrar_ayuda_modulo(modulo: str):
     console.print(f"""
 [bold]Comandos en el módulo [{color}]{modulo}[/{color}]:[/bold]
 
-  [cyan]list scripts[/cyan]   — Lista los scripts disponibles para este módulo
+  [cyan]list scripts[/cyan]   — Lista los scripts disponibles con descripción
+  [cyan]clear / cls[/cyan]    — Limpia la pantalla
   [cyan]back[/cyan]           — Vuelve al prompt principal
   [cyan]help[/cyan]           — Muestra esta ayuda
   [cyan]exit / quit[/cyan]    — Sale de Lobera
+  [dim]Ctrl+L[/dim]           — Limpia la pantalla
 """)
 
 
@@ -153,6 +197,9 @@ def _consola_modulo(modulo: str):
         elif cmd == "back":
             break
 
+        elif cmd in ("clear", "cls"):
+            _limpiar_pantalla()
+
         elif cmd == "help":
             _mostrar_ayuda_modulo(modulo)
 
@@ -167,7 +214,7 @@ def _consola_modulo(modulo: str):
 
 
 def _mostrar_scripts_modulo(modulo: str):
-    """Imprime los scripts del módulo agrupados por subcarpeta."""
+    """Imprime los scripts del módulo agrupados por subcarpeta, con descripción."""
     color = _PROTO_COLORS.get(modulo, "white")
     scripts = _listar_scripts_modulo(modulo)
 
@@ -176,21 +223,40 @@ def _mostrar_scripts_modulo(modulo: str):
         console.print(f"[dim]Ruta buscada: scripts/{modulo}/[/dim]")
         return
 
+    from rich.table import Table
+    from rich import box
+
     console.print(f"\n[bold]Scripts disponibles — [{color}]{modulo}[/{color}]:[/bold]\n")
-    for subcarpeta, nombres in scripts.items():
+    for subcarpeta, scripts_lista in scripts.items():
         console.print(f"  [bold dim]{subcarpeta}/[/bold dim]")
-        for nombre in nombres:
-            console.print(f"    [dim]•[/dim] [{color}]{nombre}[/{color}]")
+        t = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), show_edge=False)
+        t.add_column("nombre", style=f"bold {color}", no_wrap=True, min_width=28)
+        t.add_column("desc",   style="dim")
+        for nombre, desc in scripts_lista:
+            t.add_row(nombre, desc if desc else "")
+        console.print(t)
     console.print()
+
+
+# ── Limpiar pantalla ─────────────────────────────────────────────────────────
+
+def _limpiar_pantalla():
+    """Limpia la terminal de forma portable."""
+    os.system("clear" if os.name != "nt" else "cls")
 
 
 # ── Input interactivo ─────────────────────────────────────────────────────────
 
 def _leer_input(prompt_rich: str) -> str:
     """
-    Lee una línea de input. Usa console.input() de rich para soportar
-    el markup del prompt (colores, estilos).
+    Lee una línea de input usando console.input() de rich.
+    Configura readline para que Ctrl+L llame a 'clear' del SO.
     """
+    try:
+        import readline
+        readline.parse_and_bind(r'"\C-l": clear-screen')
+    except ImportError:
+        pass
     return console.input(prompt_rich)
 
 
@@ -227,6 +293,9 @@ def _consola_principal():
         if cmd in ("exit", "quit"):
             console.print("[dim]Hasta la próxima.[/dim]")
             break
+
+        elif cmd in ("clear", "cls"):
+            _limpiar_pantalla()
 
         elif cmd == "help":
             _mostrar_ayuda_principal()
