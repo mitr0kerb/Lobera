@@ -333,13 +333,16 @@ _CMDS = {
 
 
 def main():
+    import sys
     init_db()
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args   = parser.parse_args()
 
     if not args.cmd:
         _banner()
-        parser.print_help()
         return
 
     fn = _CMDS.get(args.cmd)

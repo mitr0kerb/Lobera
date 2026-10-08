@@ -1139,15 +1139,19 @@ def _banner():
 
 
 def main():
+    import sys
     from core.session_db import init_db
     init_db()
+
+    if not sys.argv[1:]:
+        _banner()
+        return
 
     parser = build_parser()
     args = parser.parse_args()
 
     if not args.vuln:
         _banner()
-        parser.print_help()
         return
 
     if args.vuln == "ms17010":
