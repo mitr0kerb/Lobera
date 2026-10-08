@@ -361,7 +361,7 @@ def build_parser():
 def _banner():
     from tools.common import banner, panel_info, tabla_modos, tabla_flags, ejemplos
 
-    banner("lobera-spray  —  Sprayer multiprotocolo con anti-lockout")
+    banner("lobera-spray")
 
     tabla_modos([
         ("smb",   "Autenticación NTLM contra SMB  (puerto 445)"),

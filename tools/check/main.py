@@ -1117,7 +1117,7 @@ def build_parser():
 
 def _banner():
     from tools.common import banner, tabla_modos, tabla_flags, ejemplos
-    banner("lobera-check  —  Checker y exploit de vulnerabilidades Windows/AD")
+    banner("lobera-check")
     tabla_modos([
         ("ms17010 check",   "Detecta si el objetivo es vulnerable a EternalBlue (CVE-2017-0144)"),
         ("ms17010 exploit", "Explota MS17-010 con el kernel exploit real — sin credenciales"),

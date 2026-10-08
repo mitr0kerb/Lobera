@@ -230,7 +230,7 @@ def build_parser():
 def _banner():
     from tools.common import banner, tabla_modos, tabla_flags, ejemplos
 
-    banner("lobera-server  —  SMB/HTTP server para red team")
+    banner("lobera-server")
 
     tabla_modos([
         ("smb",  "Servidor SMB falso que captura hashes NTLMv2 de cualquier conexión entrante"),

@@ -180,7 +180,7 @@ def build_parser():
 
 def _banner():
     from tools.common import banner, tabla_modos, ejemplos
-    banner("lobera-winrm  —  Operaciones WinRM / PowerShell Remoting")
+    banner("lobera-winrm")
     tabla_modos([
         ("check", "Verificar acceso WinRM con credenciales"),
         ("exec",  "Ejecutar comando remoto vía WinRM"),

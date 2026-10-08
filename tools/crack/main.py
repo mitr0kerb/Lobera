@@ -523,7 +523,7 @@ def build_parser():
 
 def _banner():
     from tools.common import banner, tabla_flags, ejemplos
-    banner("lobera-crack  —  Cracker offline de hashes Windows/AD")
+    banner("lobera-crack")
     tabla_flags([
         ("-H / --hash",    "str",  "Hash individual a crackear"),
         ("-f / --file",    "file", "Fichero con un hash por línea"),

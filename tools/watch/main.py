@@ -337,7 +337,7 @@ def build_parser():
 def _banner():
     from tools.common import banner, panel_info, tabla_flags, ejemplos
 
-    banner("lobera-watch  —  Monitor de eventos AD en tiempo real")
+    banner("lobera-watch")
 
     panel_info("Qué detecta", [
         "[bold green]+[/bold green] Nuevos usuarios creados en el dominio",

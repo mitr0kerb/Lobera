@@ -293,7 +293,7 @@ def build_parser():
 
 def _banner():
     from tools.common import banner, tabla_modos, ejemplos
-    banner("lobera-kerb  —  Ataques Kerberos / Active Directory")
+    banner("lobera-kerb")
     tabla_modos([
         ("asrep",     "AS-REP Roasting — hashes de cuentas sin preauth (sin creds)"),
         ("kerbroast", "Kerberoasting — TGS de cuentas con SPN (con creds)"),

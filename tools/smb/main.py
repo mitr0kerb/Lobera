@@ -256,7 +256,7 @@ def build_parser():
 
 def _banner():
     from tools.common import banner, tabla_modos, ejemplos
-    banner("lobera-smb  —  Operaciones SMB / Active Directory")
+    banner("lobera-smb")
     tabla_modos([
         ("enum",  "Enumeración SMB — shares, usuarios, OS, sesiones, signing"),
         ("spray", "Password spray contra SMB"),

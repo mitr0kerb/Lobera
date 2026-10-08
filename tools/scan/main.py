@@ -235,7 +235,7 @@ def build_parser():
 
 def _banner_tool():
     from tools.common import banner, tabla_flags, ejemplos
-    banner("lobera-scan  —  Escáner de puertos TCP")
+    banner("lobera-scan")
     tabla_flags([
         ("-t / --target",  "str", "IP, CIDR o rango (10.0.0.1-50)"),
         ("-p / --ports",   "str", "Puertos: 22,80 | 1-1024 | top100 | all"),

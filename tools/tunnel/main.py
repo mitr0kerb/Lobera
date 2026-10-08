@@ -434,7 +434,7 @@ def build_parser():
 def _banner():
     from tools.common import banner, panel_info, tabla_modos, tabla_flags, ejemplos
 
-    banner("lobera-tunnel  —  Pivoting y túneles sobre SSH")
+    banner("lobera-tunnel")
 
     tabla_modos([
         ("socks5",  "Proxy SOCKS5 local sobre SSH dinámico  (equivalente a ssh -D)"),
