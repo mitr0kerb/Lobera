@@ -264,12 +264,15 @@ def _banner():
 
 
 def main():
+    import sys
+    if not sys.argv[1:]:
+        _banner()
+        return
     parser = build_parser()
     args   = parser.parse_args()
 
     if not args.mode:
         _banner()
-        parser.print_help()
         return
 
     if args.mode == "smb":
