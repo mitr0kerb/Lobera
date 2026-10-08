@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# lobera.py — CLI principal de Lobera
+# lobera.py — Consola interactiva estilo Metasploit para Lobera
 # Autor: mitr0kerb
 
 import sys
+import os
 from pathlib import Path
 
 _ROOT = Path(__file__).parent
@@ -16,10 +17,10 @@ def show_banner():
     import pyfiglet
     art = pyfiglet.figlet_format("LOBERA", font="slant")
     console.print(f"[bold cyan]{art}[/bold cyan]")
-    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan · Listen · AMSI[/dim]")
+    console.print("[dim]  AD enumeration & attack toolkit — SMB · RPC · Kerberos · LDAP · WinRM · SSH · SSL · HTTP · HTTPS · FTP · MSSQL · Scan · Listen[/dim]")
     console.print("[dim]  v0.2 — by [/dim][bold cyan]mitr0kerb[/bold cyan]\n")
 
-# ── Tablas de shells / scanners ───────────────────────────────────────────────
+# ── Colores por módulo ────────────────────────────────────────────────────────
 
 _PROTO_COLORS = {
     "smb":      "green",
@@ -33,7 +34,222 @@ _PROTO_COLORS = {
     "https":    "deep_sky_blue1",
     "ftp":      "orange1",
     "mssql":    "bright_red",
+    "scan":     "white",
+    "crack":    "white",
+    "listen":   "white",
 }
+
+# Lista de módulos disponibles (en orden de presentación)
+_MODULOS = [
+    "smb", "kerberos", "rpc", "ldap", "winrm",
+    "ssh", "ssl", "http", "https", "ftp",
+    "mssql", "scan", "crack", "listen",
+]
+
+# Binarios disponibles en bin/
+_BINS_DISPONIBLES = [
+    "lobera-smb", "lobera-kerb", "lobera-scan", "lobera-spray",
+    "lobera-winrm", "lobera-crack", "lobera-check", "lobera-exploit",
+    "lobera-server",
+]
+
+# ── Lectura de scripts disponibles ───────────────────────────────────────────
+
+def _listar_scripts_modulo(modulo: str) -> dict:
+    """
+    Busca en scripts/<modulo>/ y devuelve un dict {subcarpeta: [nombres_script]}.
+    Los scripts se muestran sin extensión.
+    """
+    scripts_dir = _ROOT / "scripts" / modulo
+    resultado = {}
+
+    if not scripts_dir.exists():
+        return resultado
+
+    # Recorremos sólo las subcarpetas directas (enum/, attack/, etc.)
+    for entrada in sorted(scripts_dir.iterdir()):
+        if not entrada.is_dir():
+            continue
+        if entrada.name.startswith("_") or entrada.name == "__pycache__":
+            continue
+
+        nombres = []
+        for fichero in sorted(entrada.iterdir()):
+            if fichero.suffix == ".py" and not fichero.name.startswith("_"):
+                nombres.append(fichero.stem)
+
+        if nombres:
+            resultado[entrada.name] = nombres
+
+    return resultado
+
+
+# ── Listado de módulos ────────────────────────────────────────────────────────
+
+def _mostrar_modulos():
+    """Imprime la tabla de módulos disponibles con sus colores."""
+    console.print("\n[bold]Módulos disponibles:[/bold]\n")
+    for modulo in _MODULOS:
+        color = _PROTO_COLORS.get(modulo, "white")
+        console.print(f"  [{color}]{modulo:<12}[/{color}]", end="")
+    console.print("\n")
+
+
+# ── Ayuda principal ───────────────────────────────────────────────────────────
+
+def _mostrar_ayuda_principal():
+    console.print("""
+[bold]Comandos disponibles:[/bold]
+
+  [cyan]use <módulo>[/cyan]     — Entra en la consola del módulo (smb, kerberos, rpc...)
+  [cyan]modules[/cyan]          — Lista los módulos disponibles
+  [cyan]help[/cyan]             — Muestra esta ayuda
+  [cyan]exit / quit[/cyan]      — Sale de Lobera
+  [dim]Ctrl+C[/dim]             — Sale de Lobera
+""")
+
+
+# ── Ayuda del módulo ──────────────────────────────────────────────────────────
+
+def _mostrar_ayuda_modulo(modulo: str):
+    color = _PROTO_COLORS.get(modulo, "white")
+    console.print(f"""
+[bold]Comandos en el módulo [{color}]{modulo}[/{color}]:[/bold]
+
+  [cyan]list scripts[/cyan]   — Lista los scripts disponibles para este módulo
+  [cyan]back[/cyan]           — Vuelve al prompt principal
+  [cyan]help[/cyan]           — Muestra esta ayuda
+  [cyan]exit / quit[/cyan]    — Sale de Lobera
+""")
+
+
+# ── Consola del módulo ────────────────────────────────────────────────────────
+
+def _consola_modulo(modulo: str):
+    """Bucle interactivo dentro de un módulo concreto."""
+    color = _PROTO_COLORS.get(modulo, "white")
+    prompt_modulo = f"lobera [{color}]{modulo}[/{color}]"
+
+    console.print(f"\n[dim]Entrando en módulo [{color}]{modulo}[/{color}]. Escribe 'help' para ver comandos.[/dim]\n")
+
+    while True:
+        try:
+            linea = _leer_input(f"lobera [[{color}]{modulo}[/{color}]] > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Volviendo al prompt principal...[/dim]")
+            break
+
+        if not linea:
+            continue
+
+        partes = linea.split(maxsplit=1)
+        cmd = partes[0].lower()
+        resto = partes[1].strip() if len(partes) > 1 else ""
+
+        if cmd in ("exit", "quit"):
+            console.print("[dim]Saliendo de Lobera...[/dim]")
+            sys.exit(0)
+
+        elif cmd == "back":
+            break
+
+        elif cmd == "help":
+            _mostrar_ayuda_modulo(modulo)
+
+        elif cmd == "list" and resto == "scripts":
+            _mostrar_scripts_modulo(modulo)
+
+        elif cmd == "list":
+            console.print(f"[yellow]¿Quizás quisiste decir 'list scripts'?[/yellow]")
+
+        else:
+            console.print(f"[red]Comando desconocido: {cmd}[/red]  (escribe 'help' para ver comandos)")
+
+
+def _mostrar_scripts_modulo(modulo: str):
+    """Imprime los scripts del módulo agrupados por subcarpeta."""
+    color = _PROTO_COLORS.get(modulo, "white")
+    scripts = _listar_scripts_modulo(modulo)
+
+    if not scripts:
+        console.print(f"[yellow]No se encontraron scripts para el módulo '{modulo}'.[/yellow]")
+        console.print(f"[dim]Ruta buscada: scripts/{modulo}/[/dim]")
+        return
+
+    console.print(f"\n[bold]Scripts disponibles — [{color}]{modulo}[/{color}]:[/bold]\n")
+    for subcarpeta, nombres in scripts.items():
+        console.print(f"  [bold dim]{subcarpeta}/[/bold dim]")
+        for nombre in nombres:
+            console.print(f"    [dim]•[/dim] [{color}]{nombre}[/{color}]")
+    console.print()
+
+
+# ── Input interactivo ─────────────────────────────────────────────────────────
+
+def _leer_input(prompt_rich: str) -> str:
+    """
+    Lee una línea de input. Usa console.input() de rich para soportar
+    el markup del prompt (colores, estilos).
+    """
+    return console.input(prompt_rich)
+
+
+# ── Consola principal ─────────────────────────────────────────────────────────
+
+def _consola_principal():
+    """Bucle principal de la consola interactiva estilo Metasploit."""
+
+    # Mensaje informativo sobre binarios directos
+    bins_str = "  ".join(_BINS_DISPONIBLES)
+    console.print(
+        "[dim]Modo interactivo — para uso directo usa los comandos: "
+        + "  ".join(_BINS_DISPONIBLES)
+        + "[/dim]"
+    )
+
+    _mostrar_modulos()
+    console.print("[dim]Escribe 'help' para ver los comandos disponibles.[/dim]\n")
+
+    while True:
+        try:
+            linea = _leer_input("lobera [bold cyan]>[/bold cyan] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Saliendo...[/dim]")
+            break
+
+        if not linea:
+            continue
+
+        partes = linea.split(maxsplit=1)
+        cmd = partes[0].lower()
+        resto = partes[1].strip() if len(partes) > 1 else ""
+
+        if cmd in ("exit", "quit"):
+            console.print("[dim]Hasta la próxima.[/dim]")
+            break
+
+        elif cmd == "help":
+            _mostrar_ayuda_principal()
+
+        elif cmd == "modules":
+            _mostrar_modulos()
+
+        elif cmd == "use":
+            if not resto:
+                console.print("[red]Uso: use <módulo>[/red]  (ej: use smb, use kerberos)")
+                continue
+            modulo = resto.lower()
+            if modulo not in _MODULOS:
+                console.print(f"[red]Módulo desconocido: '{modulo}'[/red]")
+                console.print(f"[dim]Módulos disponibles: {', '.join(_MODULOS)}[/dim]")
+                continue
+            _consola_modulo(modulo)
+
+        else:
+            console.print(f"[red]Comando desconocido: {cmd}[/red]  (escribe 'help' para ver comandos)")
+
+
+# ── Tablas de shells / scanners (mantenidas para compatibilidad) ──────────────
 
 _SHELL_CLASSES = {
     "smb":      ("modules.smb_script_shell",      "SMBScriptShell"),
@@ -63,7 +279,7 @@ _SCANNER_FUNCS = {
     "mssql":    ("scripts.mssql.scanner",     "run_mssql_scanner"),
 }
 
-# ── Dispatcher genérico ───────────────────────────────────────────────────────
+# ── Dispatcher genérico (conservado para uso directo desde otros módulos) ─────
 
 def _run_proto_single(protocol, args):
     """Ejecuta el protocolo contra un único objetivo ya fijado en args.target."""
@@ -109,7 +325,7 @@ def _run_proto(protocol, args):
     los objetivos y los procesa en paralelo con --workers hilos.
     """
     from core.cidr import expand_targets
-    import copy, types
+    import copy
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     raw_target = getattr(args, "target", None)
@@ -129,7 +345,6 @@ def _run_proto(protocol, args):
     )
 
     def _run_one(ip):
-        # Crea una copia de args con el target individual
         args_copy = copy.copy(args)
         args_copy.target = ip
         _run_proto_single(protocol, args_copy)
@@ -148,7 +363,7 @@ def _run_proto(protocol, args):
                     console.print(f"[red]Error en {ip}: {exc}[/red]")
 
 
-# ── Funciones por protocolo ───────────────────────────────────────────────────
+# ── Funciones por protocolo (conservadas) ─────────────────────────────────────
 
 def run_report(args):
     from core.report import generate_report
@@ -161,7 +376,6 @@ def run_report(args):
 
 def run_completion(args):
     """Muestra instrucciones de instalación del autocompletado."""
-    import os
     shell  = getattr(args, "shell", "bash") or "bash"
     lobera_dir = os.path.dirname(os.path.abspath(__file__))
     comp_dir   = os.path.join(lobera_dir, "tools", "completions")
@@ -268,7 +482,7 @@ def run_listen(args):
 
 def run_amsi(args):
     """Wrapper Python para el binario AMSI/ETW bypass (C)."""
-    import subprocess, os, json
+    import subprocess, json
 
     bin_path = os.path.join(os.path.dirname(__file__), "bin", "lobera-amsi-bypass.exe")
     if not os.path.isfile(bin_path):
@@ -312,6 +526,7 @@ def run_amsi(args):
             console.print(result.stdout)
     if result.stderr:
         console.print(f"  [dim]{result.stderr.strip()}[/dim]")
+
 
 # ── db ────────────────────────────────────────────────────────────────────────
 
@@ -385,7 +600,8 @@ def run_db(args):
         console.print("[yellow]Acciones disponibles: targets, findings, creds, delete[/yellow]")
         console.print("[dim]lobera.py db <acción> -h[/dim]")
 
-# ── Parser ────────────────────────────────────────────────────────────────────
+
+# ── Parser (conservado para modo CLI directo) ─────────────────────────────────
 
 def _add_proto_flags(p):
     """
@@ -404,7 +620,7 @@ def _add_proto_flags(p):
                    dest="script_fam",
                    help="Ejecuta toda una familia de scripts")
 
-    # ── credenciales / target base (comunes a casi todos los scripts) ─────────
+    # ── credenciales / target base ────────────────────────────────────────────
     p.add_argument("-t", "--target",   default=None,   help="IP/hostname del objetivo")
     p.add_argument("-u", "--user",     default=None,   help="Usuario")
     p.add_argument("-p", "--password", default=None,   help="Contraseña")
@@ -604,31 +820,31 @@ def build_parser():
         p = subs.add_parser(proto, help=help_text)
         _add_proto_flags(p)
 
-    # ── exploit (redirige a binarios especializados) ─────────────────────────
+    # ── exploit ──────────────────────────────────────────────────────────────
     exp_p = subs.add_parser("exploit", help="→ usa lobera-check / lobera-exploit")
     exp_s = exp_p.add_subparsers(dest="exploit_module", metavar="módulo")
     exp_s.add_parser("ms17010", help="→ usa lobera-check --target IP")
 
-    # ── crack (Rust binary) ──────────────────────────────────────────────────
-    crack_p = subs.add_parser("crack", help="Crackeo offline de hashes Kerberos/NTLM (Rust, multi-core)")
+    # ── crack ────────────────────────────────────────────────────────────────
+    crack_p = subs.add_parser("crack", help="Crackeo offline de hashes Kerberos/NTLM")
     crack_p.add_argument("-f", "--format",   required=True,
                          choices=["asrep", "tgs", "ntlm", "ntlmv2", "auto"],
-                         help="Formato del hash: asrep | tgs | ntlm | ntlmv2 | auto")
+                         help="Formato del hash")
     crack_p.add_argument("-H", "--hash",     required=True,
-                         help="Hash en texto o ruta a fichero con múltiples hashes")
+                         help="Hash en texto o ruta a fichero")
     crack_p.add_argument("-w", "--wordlist", required=True,
-                         help="Ruta al diccionario (ej: /usr/share/wordlists/rockyou.txt)")
+                         help="Ruta al diccionario")
     crack_p.add_argument("-t", "--threads",  default=None, type=int,
-                         help="Número de threads (default: núcleos de la CPU)")
+                         help="Número de threads")
     crack_p.add_argument("--progress",       default=10000, type=int,
-                         help="Mostrar progreso cada N contraseñas (default: 10000)")
+                         help="Mostrar progreso cada N contraseñas")
     crack_p.add_argument("--json-only",      action="store_true", dest="json_only",
-                         help="Suprimir stderr del cracker (solo JSON a stdout)")
+                         help="Solo JSON a stdout")
 
-    # ── scan (Go binary) ─────────────────────────────────────────────────────
-    scan_p = subs.add_parser("scan", help="Scanner de puertos y servicios (Go) — IP, CIDR o rango")
+    # ── scan ─────────────────────────────────────────────────────────────────
+    scan_p = subs.add_parser("scan", help="Scanner de puertos y servicios (Go)")
     scan_p.add_argument("-t", "--target",  required=True,
-                        help="IP, CIDR o rango (ej: 10.10.10.0/24, 10.10.10.1-50)")
+                        help="IP, CIDR o rango (ej: 10.10.10.0/24)")
     scan_p.add_argument("-p", "--ports",   default="ad",
                         help="ad (default) | all | 80,443,445 | 80-1000")
     scan_p.add_argument("--threads",       default=200, type=int,
@@ -636,11 +852,11 @@ def build_parser():
     scan_p.add_argument("--timeout",       default=500, type=int, dest="scan_timeout",
                         help="Timeout por puerto en ms (default: 500)")
     scan_p.add_argument("--banners",       action="store_true",
-                        help="Intentar leer banner de puertos abiertos")
+                        help="Leer banner de puertos abiertos")
     scan_p.add_argument("--closed",        action="store_true",
                         help="Mostrar también puertos cerrados")
 
-    # ── db ──────────────────────────────────────────────────────────────────
+    # ── db ────────────────────────────────────────────────────────────────────
     db_p = subs.add_parser("db", help="Base de datos de sesión")
     db_s = db_p.add_subparsers(dest="db_action", metavar="acción")
 
@@ -661,49 +877,34 @@ def build_parser():
 
     # ── report ────────────────────────────────────────────────────────────────
     rep_p = subs.add_parser("report", help="Genera informe HTML/Markdown a partir de la DB")
-    rep_p.add_argument("-t", "--target",  default=None,
-                       help="IP a reportar (omitir = todos los objetivos)")
-    rep_p.add_argument("--format",        default="html", choices=["html", "md"],
-                       dest="format",
-                       help="Formato del informe: html (default) o md")
-    rep_p.add_argument("-o", "--output",  default=None,
-                       help="Ruta de salida (auto-generada si se omite)")
+    rep_p.add_argument("-t", "--target",  default=None)
+    rep_p.add_argument("--format",        default="html", choices=["html", "md"], dest="format")
+    rep_p.add_argument("-o", "--output",  default=None)
 
     # ── completion ────────────────────────────────────────────────────────────
-    comp_p = subs.add_parser("completion", help="Muestra instrucciones para instalar el autocompletado")
-    comp_p.add_argument("--shell", default="bash", choices=["bash", "zsh"],
-                        help="Shell de destino (bash o zsh)")
+    comp_p = subs.add_parser("completion", help="Instrucciones para instalar el autocompletado")
+    comp_p.add_argument("--shell", default="bash", choices=["bash", "zsh"])
 
     # ── listen ────────────────────────────────────────────────────────────────
     lst_p = subs.add_parser("listen", help="Handler/listener para reverse shells TCP/HTTP/HTTPS")
-    lst_p.add_argument("-p", "--port",  default=4444, type=int,
-                       help="Puerto a escuchar (default: 4444)")
-    lst_p.add_argument("--type",        default="tcp", choices=["tcp", "http", "https"],
-                       dest="type", help="Tipo de listener (default: tcp)")
-    lst_p.add_argument("--cert",        default=None,
-                       help="Certificado .pem para HTTPS")
-    lst_p.add_argument("--multi",       action="store_true", default=False,
-                       help="Aceptar múltiples conexiones simultáneas")
-    lst_p.add_argument("--log",         default=None,
-                       help="Fichero donde guardar el log de sesiones")
+    lst_p.add_argument("-p", "--port",  default=4444, type=int)
+    lst_p.add_argument("--type",        default="tcp", choices=["tcp", "http", "https"], dest="type")
+    lst_p.add_argument("--cert",        default=None)
+    lst_p.add_argument("--multi",       action="store_true", default=False)
+    lst_p.add_argument("--log",         default=None)
 
     # ── amsi-bypass ───────────────────────────────────────────────────────────
     amsi_p = subs.add_parser("amsi", help="AMSI/ETW bypass (requiere compilar src/exploits/amsi/)")
-    amsi_p.add_argument("-t", "--target",    default=None, help="IP del objetivo (opcional, si se lanza remoto)")
-    amsi_p.add_argument("--patch-amsi",      action="store_true", dest="patch_amsi",
-                        help="Parchear AmsiScanBuffer")
-    amsi_p.add_argument("--patch-etw",       action="store_true", dest="patch_etw",
-                        help="Parchear NtTraceEvent (silenciar ETW)")
-    amsi_p.add_argument("--check",           action="store_true",
-                        help="Verificar si AMSI está activo")
-    amsi_p.add_argument("--delay",           action="store_true",
-                        help="Delay de evasión de sandbox")
-    amsi_p.add_argument("--delay-ms",        default=5000, type=int, dest="delay_ms",
-                        help="Milisegundos de delay (default: 5000)")
-    amsi_p.add_argument("--load",            default=None, dest="load_dll",
-                        help="Cargar DLL reflectiva desde ruta")
+    amsi_p.add_argument("-t", "--target",    default=None)
+    amsi_p.add_argument("--patch-amsi",      action="store_true", dest="patch_amsi")
+    amsi_p.add_argument("--patch-etw",       action="store_true", dest="patch_etw")
+    amsi_p.add_argument("--check",           action="store_true")
+    amsi_p.add_argument("--delay",           action="store_true")
+    amsi_p.add_argument("--delay-ms",        default=5000, type=int, dest="delay_ms")
+    amsi_p.add_argument("--load",            default=None, dest="load_dll")
 
     return parser
+
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -712,68 +913,56 @@ def main():
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
+    # Inicializar BD (muestra bienvenida en la primera ejecución)
     init_db()
 
+    # Autenticación
     from core.auth import login
     if not login():
         sys.exit(1)
 
-    parser = build_parser()
-    args   = parser.parse_args()
+    # Si se pasaron argumentos por CLI, usar el modo clásico (no interactivo)
+    if len(sys.argv) > 1:
+        parser = build_parser()
+        args   = parser.parse_args()
 
-    if args.module is None:
-        show_banner()
-        console.print("[yellow]No se ha especificado ningún módulo.[/yellow]")
-        console.print(
-            "Módulos disponibles: "
-            "[bold green]smb[/bold green] · "
-            "[bold magenta]kerberos[/bold magenta] · "
-            "[bold blue]rpc[/bold blue] · "
-            "[bold yellow]ldap[/bold yellow] · "
-            "[bold cyan]winrm[/bold cyan] · "
-            "[bold turquoise2]ssh[/bold turquoise2] · "
-            "[bold gold1]ssl[/bold gold1] · "
-            "[bold bright_cyan]http[/bold bright_cyan] · "
-            "[bold deep_sky_blue1]https[/bold deep_sky_blue1] · "
-            "[bold orange1]ftp[/bold orange1] · "
-            "[bold bright_red]mssql[/bold bright_red] · "
-            "[bold white]db[/bold white] · "
-            "[bold white]report[/bold white] · "
-            "[bold white]listen[/bold white] · "
-            "[bold white]amsi[/bold white]"
-        )
-        console.print("[dim]lobera.py <módulo>                    → árbol de scripts disponibles[/dim]")
-        console.print("[dim]lobera.py <módulo> --script=<nombre>  → ver parámetros / ejecutar[/dim]")
-        console.print("[dim]lobera.py <módulo> --scanner          → autopwn scanner[/dim]")
-        console.print("[dim]lobera.py <módulo> --interactive-shell → consola interactiva[/dim]\n")
+        if args.module is None:
+            show_banner()
+            console.print("[yellow]No se ha especificado ningún módulo.[/yellow]")
+            console.print("[dim]Ejecuta 'lobera.py' sin argumentos para la consola interactiva.[/dim]")
+            return
+
+        dispatch = {
+            "smb":        run_smb,
+            "kerberos":   run_kerberos,
+            "rpc":        run_rpc,
+            "ldap":       run_ldap,
+            "winrm":      run_winrm,
+            "ssh":        run_ssh,
+            "ssl":        run_ssl,
+            "http":       run_http,
+            "https":      run_https,
+            "ftp":        run_ftp,
+            "mssql":      run_mssql,
+            "exploit":    run_exploit,
+            "crack":      run_crack,
+            "scan":       run_scan,
+            "listen":     run_listen,
+            "amsi":       run_amsi,
+            "db":         run_db,
+            "report":     run_report,
+            "completion": run_completion,
+        }
+        runner = dispatch.get(args.module)
+        if runner:
+            runner(args)
+        else:
+            console.print(f"[red]Módulo desconocido: {args.module}[/red]")
         return
 
-    dispatch = {
-        "smb":      run_smb,
-        "kerberos": run_kerberos,
-        "rpc":      run_rpc,
-        "ldap":     run_ldap,
-        "winrm":    run_winrm,
-        "ssh":      run_ssh,
-        "ssl":      run_ssl,
-        "http":     run_http,
-        "https":    run_https,
-        "ftp":      run_ftp,
-        "mssql":    run_mssql,
-        "exploit":    run_exploit,
-        "crack":      run_crack,
-        "scan":       run_scan,
-        "listen":     run_listen,
-        "amsi":       run_amsi,
-        "db":         run_db,
-        "report":     run_report,
-        "completion": run_completion,
-    }
-    runner = dispatch.get(args.module)
-    if runner:
-        runner(args)
-    else:
-        console.print(f"[red]Módulo desconocido: {args.module}[/red]")
+    # Sin argumentos: modo consola interactiva
+    show_banner()
+    _consola_principal()
 
 
 if __name__ == "__main__":
