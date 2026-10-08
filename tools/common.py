@@ -17,17 +17,24 @@ from rich import box
 
 
 def banner(nombre: str, version: str = "0.2", subtitulo: str = ""):
-    """Imprime el logo ASCII de Lobera + nombre del binario y versión."""
+    """Imprime el logo ASCII de Lobera + nombre del módulo en smslant y versión."""
     try:
         import pyfiglet
-        art = pyfiglet.figlet_format("LOBERA", font="slant")
+        art_lobera = pyfiglet.figlet_format("LOBERA", font="slant")
+        # nombre puede ser "lobera-kerb" → extraer la parte del módulo en mayúsculas
+        modulo = nombre.split("-", 1)[-1].upper() if "-" in nombre else nombre.upper()
+        try:
+            art_modulo = pyfiglet.figlet_format(modulo, font="smslant")
+        except Exception:
+            art_modulo = modulo
     except Exception:
-        art = "LOBERA"
+        art_lobera = "LOBERA"
+        art_modulo = nombre.upper()
 
-    console.print(f"[bold cyan]{art}[/bold cyan]")
+    console.print(f"[bold cyan]{art_lobera}[/bold cyan]", end="")
+    console.print(f"[cyan]{art_modulo}[/cyan]")
     console.print(
-        f"  [bold cyan]{nombre}[/bold cyan]  "
-        f"[dim]v{version} — by mitr0kerb[/dim]\n"
+        f"  [dim]v{version} — by mitr0kerb[/dim]\n"
     )
 
 
