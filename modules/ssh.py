@@ -6,8 +6,12 @@ import time
 import threading
 from typing import Optional
 
-import paramiko
-from paramiko.transport import Transport
+try:
+    import paramiko
+    from paramiko.transport import Transport
+    _PARAMIKO_OK = True
+except ImportError:
+    _PARAMIKO_OK = False
 
 from core.output import print_result, print_table, print_check, console
 from core import session_db

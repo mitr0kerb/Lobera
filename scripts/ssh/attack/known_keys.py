@@ -42,7 +42,7 @@ class Script(BaseScript):
         valid = []
         for kp in key_files:
             key = None
-            for cls in (paramiko.RSAKey, paramiko.DSAKey,
+            for cls in (paramiko.RSAKey, paramiko.DSSKey,
                         paramiko.ECDSAKey, paramiko.Ed25519Key):
                 try:
                     key = cls.from_private_key_file(kp); break

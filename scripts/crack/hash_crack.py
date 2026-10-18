@@ -114,21 +114,15 @@ class Script:
                 h = item.get("hash", "")[:40] + ("..." if len(item.get("hash","")) > 40 else "")
                 pw = item.get("password", "")
                 console.print(f"    [green]{h}[/green]  →  [bold]{pw}[/bold]")
-                print_result("crack", {
-                    "hash":     item.get("hash"),
-                    "password": pw,
-                    "format":   item.get("format"),
-                })
+                print_result("CRACK", "localhost", "pwned",
+                             f"hash crackeado: {pw} (formato: {item.get('format','-')})")
                 # Guardar en session_db
                 try:
                     session_db.save_finding(
-                        category="cracked_hash",
-                        data={
-                            "hash":     item.get("hash"),
-                            "password": pw,
-                            "format":   item.get("format"),
-                            "wordlist": args.wordlist,
-                        },
+                        "localhost",
+                        "crack",
+                        "cracked_hash",
+                        f"hash={item.get('hash','')[:40]} password={pw} format={item.get('format','-')}",
                     )
                 except Exception:
                     pass

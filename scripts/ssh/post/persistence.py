@@ -17,6 +17,7 @@ Uso:
   python lobera.py ssh -t 10.10.10.5 --script=persistence -u USER -p PASS --method suid
 """
 
+from scripts.base import BaseScript
 from core.output import console
 from core import session_db
 
@@ -217,25 +218,23 @@ def _suid_bash(client):
 
 # ── Script principal ───────────────────────────────────────────────────────────
 
-class Script:
-    NAME        = "persistence"
-    DESCRIPTION = "Persistencia remota Linux vía SSH: crontab, authorized_keys, bashrc, systemd, rc.local, SUID"
+class Script(BaseScript):
+    name        = "persistence"
+    protocol    = "ssh"
+    category    = "post"
+    description = "Persistencia remota Linux vía SSH: crontab, authorized_keys, bashrc, systemd, rc.local, SUID"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target     = str(self.target.ip)
-        user       = getattr(args, "user",         None) or (self.creds.username if self.creds else None)
-        password   = getattr(args, "password",     "") or (self.creds.password if self.creds else "")
-        port       = int(getattr(args, "port",     None) or 22)
-        key_file   = getattr(args, "local_file",   None)   # reutilizamos --local-file para clave privada/pública
-        method     = getattr(args, "method",       "crontab") or "crontab"
-        payload    = getattr(args, "exec",         None)
-        name       = getattr(args, "persist_name", "sys-update")
-        trigger    = getattr(args, "trigger",      "*/5 * * * *")  # cron schedule
-        system_wide= getattr(args, "full",         False)          # --full → systemd system-wide
+        user       = kwargs.get("user") or (self.creds.user if self.creds else None)
+        password   = kwargs.get("password") or (self.creds.password if self.creds else "")
+        port       = int(kwargs.get("port") or 22)
+        key_file   = kwargs.get("local_file")      # reutilizamos --local-file para clave privada/pública
+        method     = kwargs.get("method") or "crontab"
+        payload    = kwargs.get("exec")
+        name       = kwargs.get("persist_name") or "sys-update"
+        trigger    = kwargs.get("trigger") or "*/5 * * * *"  # cron schedule
+        system_wide= kwargs.get("full", False)                # --full → systemd system-wide
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -297,14 +296,8 @@ class Script:
 
         if success:
             session_db.save_finding(
-                category="persistence",
-                data={
-                    "target":  target,
-                    "proto":   "ssh",
-                    "method":  method,
-                    "name":    name,
-                    "payload": payload,
-                }
+                target, "SSH", "persistence",
+                f"method={method} name={name} payload={payload}"
             )
             console.print(f"\n  [bold green]✓ Persistencia establecida[/bold green]")
         else:

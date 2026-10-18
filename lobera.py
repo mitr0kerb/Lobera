@@ -626,7 +626,6 @@ def _consola_principal():
     _COMPLETADO_CONTEXTO["modulo"] = None
 
     # Mensaje informativo sobre binarios directos
-    bins_str = "  ".join(_BINS_DISPONIBLES)
     console.print(
         "[dim]Modo interactivo — para uso directo usa los comandos: "
         + "  ".join(_BINS_DISPONIBLES)

@@ -168,7 +168,7 @@ def _html_creds(creds: list, show_ip: bool = False) -> str:
         rows += (
             f"<tr>{ip_cell}"
             f"<td><strong>{c['user']}</strong></td>"
-            f"<td>{c.get('type','-')}</td>"
+            f"<td>{c.get('secret_type', c.get('type', '-'))}</td>"
             f"<td>{valid}</td>"
             f"<td>{c.get('source','-')}</td>"
             f"<td class='ts'>{c.get('timestamp','')}</td></tr>\n"
@@ -260,7 +260,7 @@ def _build_markdown(data: dict, target_ip: str | None) -> str:
             ip_c  = f"| {c.get('_ip','')} " if show_ip else ""
             valid = "✅" if c.get("valid") else "❌"
             lines.append(
-                f"{ip_c}| {c['user']} | {c.get('type','-')} | {valid} | {c.get('source','-')} | {c.get('timestamp','')} |"
+                f"{ip_c}| {c['user']} | {c.get('secret_type', c.get('type', '-'))} | {valid} | {c.get('source','-')} | {c.get('timestamp','')} |"
             )
     else:
         lines.append("*Sin credenciales registradas.*")
