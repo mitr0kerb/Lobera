@@ -57,7 +57,7 @@ class KerberosModule:
         user     = user     or self.creds.user     or ""
         domain   = domain   or self.creds.domain   or self.target.domain or ""
         password = password or self.creds.password or ""
-        nt_hash  = nt_hash  or self.creds.nt_hash  or ""
+        nt_hash  = nt_hash  or self.creds.hash  or ""
         kdcHost  = kdcHost  or self._dc_ip
 
         lm_hash = ""

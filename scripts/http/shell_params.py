@@ -18,13 +18,6 @@ SCRIPT_PARAMS = {
         "defaults": {"port": 80, "timeout": 5},
         "example": ["set target 10.10.10.5", "run"],
     },
-    "dir-bruteforce": {
-        "description": "Fuerza bruta de directorios y ficheros. Detecta paneles de admin y rutas sensibles.",
-        "required": ["target"],
-        "optional": ["port", "timeout", "wordlist", "delay", "extensions"],
-        "defaults": {"port": 80, "timeout": 5, "delay": 0},
-        "example": ["set target 10.10.10.5", "set wordlist /opt/wordlists/common.txt", "run"],
-    },
     "cors-check": {
         "description": "Detecta CORS misconfiguration: origins arbitrarios, null origin, credenciales con wildcard.",
         "required": ["target"],

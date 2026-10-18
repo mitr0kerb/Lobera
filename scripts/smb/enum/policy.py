@@ -39,7 +39,7 @@ class Script(BaseScript):
         try:
             conn = SMBConnection(ip, ip, timeout=timeout)
             conn.login(user, passwd, domain, lm_hash, nt_hash)
-            rpctransport = transport.SMBTransport(ip, filename="\\\\samr", smb_connection=conn)
+            rpctransport = transport.SMBTransport(ip, filename=r"\samr", smb_connection=conn)
             dce = rpctransport.get_dce_rpc()
             dce.connect(); dce.bind(samr.MSRPC_UUID_SAMR)
 

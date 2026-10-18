@@ -35,7 +35,7 @@ class Script(BaseScript):
     category    = "tickets"
     description = "Importa un ticket .ccache/.kirbi y lo activa para la sesión actual"
 
-    EXAMPLES = [
+    examples = [
         {"flag": "--ccache",
          "desc": "Ruta a un fichero .ccache (formato MIT Kerberos)",
          "good": "kerberos --script=pass-the-ticket --ccache /tmp/admin.ccache",

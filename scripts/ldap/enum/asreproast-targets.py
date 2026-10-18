@@ -13,7 +13,7 @@ except ImportError:
 class Script(BaseScript):
     name        = "asreproast-targets"
     protocol    = "ldap"
-    category    = "attack"
+    category    = "enum"
     description = (
         "Enumera via LDAP cuentas sin preautenticación Kerberos (UAC DONT_REQ_PREAUTH). "
         "Genera lista de usuarios lista para pasar a kerberos --script=asrep-roasting."

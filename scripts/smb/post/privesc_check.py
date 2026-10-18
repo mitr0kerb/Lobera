@@ -19,8 +19,14 @@ Uso:
   python lobera.py smb -t 10.10.10.5 --script=privesc-check -u USER -H :HASH --full
 """
 
+from scripts.base import BaseScript
 from core.output import console, print_result
 from core import session_db
+
+try:
+    from impacket.dcerpc.v5.dtypes import NULL
+except ImportError:
+    NULL = None
 
 
 REGISTRY_CHECKS = [
@@ -56,21 +62,19 @@ PRIVS_OF_INTEREST = [
 ]
 
 
-class Script:
-    NAME        = "privesc-check"
-    DESCRIPTION = "Enumeración de vectores de escalada de privilegios (local)"
+class Script(BaseScript):
+    name        = "privesc-check"
+    protocol    = "smb"
+    category    = "post"
+    description = "Enumeración de vectores de escalada de privilegios (local)"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target   = str(self.target.ip)
-        user     = getattr(args, 'username', None) or (self.creds.username if self.creds else None)
-        password = getattr(args, 'password', '') or (self.creds.password if self.creds else '')
-        domain   = getattr(args, 'domain',   '') or (self.creds.domain   if self.creds else '')
-        hash_    = getattr(args, 'hash',     None)
-        full     = getattr(args, 'full',     False)
+        user     = self.creds.user or kwargs.get('user')
+        password = self.creds.password or kwargs.get('password', '')
+        domain   = self.creds.domain or kwargs.get('domain', '')
+        hash_    = self.creds.hash or kwargs.get('hash')
+        full     = kwargs.get('full', False)
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -206,7 +210,10 @@ class Script:
             console.print(f"  [bold red]⚠ {len(findings)} vector(es) de privesc encontrado(s)[/bold red]")
             for f in findings:
                 console.print(f"    • {f['type']}: {list(f.values())[1]}")
-                session_db.save_finding(category="privesc", data={**f, "target": target})
+                session_db.DB.SaveFinding(
+                    target, "SMB", "privesc",
+                    f"type={f['type']} detail={list(f.values())[1]}"
+                )
         else:
             console.print("  [green]No se encontraron vectores de privesc obvios.[/green]")
 

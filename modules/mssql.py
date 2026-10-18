@@ -2,7 +2,15 @@
 import socket
 import time
 
-from impacket.tds import MSSQL
+try:
+    from impacket.tds import MSSQL as _MSSQL_CLASS
+    _IMPACKET_OK = True
+except ImportError:
+    _MSSQL_CLASS  = None
+    _IMPACKET_OK  = False
+
+MSSQL = _MSSQL_CLASS  # alias para compatibilidad interna
+
 from core.output import print_result, print_table, print_check, console
 from core import session_db
 
@@ -21,11 +29,15 @@ class MSSQLModule:
         return PROTO
 
     def connect(self, port=1433, instance="", timeout=None):
+        if not _IMPACKET_OK:
+            print_result(PROTO, self.target.ip, "fail",
+                         "impacket no instalado — ejecuta: pip install impacket")
+            return False
         self._port     = port
         self._instance = instance
         timeout        = timeout or self.target.timeout
         try:
-            self._ms = MSSQL(self.target.ip, port)
+            self._ms = _MSSQL_CLASS(self.target.ip, port)
             self._ms.connect()
             session_db.save_target(self.target.ip, domain=self.target.domain)
             suffix = (" instancia '" + instance + "'") if instance else ""

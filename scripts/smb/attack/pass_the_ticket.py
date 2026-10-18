@@ -89,13 +89,12 @@ class Script(BaseScript):
                 print_table(
                     f"Shares accesibles con ticket ({len(shares)})",
                     ["Share", "Tipo", "Comentario"],
-                    [(s.get("name", "?"), s.get("type", "?"), s.get("comment", ""))
-                     for s in shares],
+                    [(name, stype, comment) for name, stype, comment in shares],
                 )
-                for s in shares:
+                for name, stype, comment in shares:
                     session_db.save_finding(
                         self.target.ip, "SMB", "share_found",
-                        f"PTT - {s.get('name','?')} ({s.get('type','?')})"
+                        f"PTT - {name} ({stype})"
                     )
             else:
                 console.print("  [yellow]Sin shares accesibles con este ticket[/yellow]")

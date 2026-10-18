@@ -47,19 +47,19 @@ class HTTPSScriptShell:
         self._family_map  = _build_family_map(self._root)
 
     def _banner(self):
-        art = pyfiglet.figlet_format("HTTP", font="slant")
+        art = pyfiglet.figlet_format("HTTPS", font="slant")
         console.print(f"[bold {COLOR}]{art}[/bold {COLOR}]", end="")
         console.print(Panel(
-            f"[dim]Consola interactiva de scripts [bold {COLOR}]HTTP[/bold {COLOR}] — Lobera[/dim]\n"
+            f"[dim]Consola interactiva de scripts [bold {COLOR}]HTTPS[/bold {COLOR}] — Lobera[/dim]\n"
             f"[dim]Escribe [bold]help[/bold] para ver los comandos disponibles.[/dim]",
             border_style=COLOR, expand=False))
         console.print()
 
     def _prompt(self):
         if self._script_name:
-            return (f"[bold {COLOR}]http-shell[/bold {COLOR}]"
+            return (f"[bold {COLOR}]https-shell[/bold {COLOR}]"
                     f"([bold white]{self._script_name}[/bold white]) > ")
-        return f"[bold {COLOR}]http-shell[/bold {COLOR}] > "
+        return f"[bold {COLOR}]https-shell[/bold {COLOR}] > "
 
     def run(self):
         self._banner()
@@ -67,13 +67,13 @@ class HTTPSScriptShell:
             try:
                 line = console.input(self._prompt()).strip()
             except (EOFError, KeyboardInterrupt):
-                console.print("\n[dim]Saliendo de la consola HTTP.[/dim]"); break
+                console.print("\n[dim]Saliendo de la consola HTTPS.[/dim]"); break
             if not line: continue
             parts = line.split(maxsplit=2)
             cmd   = parts[0].lower()
             args  = parts[1:]
             if cmd in ("exit","quit"):
-                console.print("[dim]Saliendo de la consola HTTP.[/dim]"); break
+                console.print("[dim]Saliendo de la consola HTTPS.[/dim]"); break
             elif cmd == "help":     self._cmd_help()
             elif cmd == "list":     self._cmd_list()
             elif cmd == "load":     self._cmd_load(args[0] if args else "")
@@ -89,7 +89,7 @@ class HTTPSScriptShell:
         t = Table(box=box.SIMPLE, show_header=False, padding=(0,2))
         t.add_column(style=f"bold {COLOR}"); t.add_column(style="dim")
         for cmd, desc in [
-            ("list",           "Lista los scripts HTTPSS agrupados por familia"),
+            ("list",           "Lista los scripts HTTPS agrupados por familia"),
             ("load <script>",  "Carga un script individual"),
             ("load-fam <fam>", "Carga y ejecuta todos los scripts de una familia"),
             ("params",         "Muestra parámetros del script cargado"),
@@ -107,7 +107,7 @@ class HTTPSScriptShell:
             fam = self._family_map.get(name, "other")
             families.setdefault(fam, []).append((name, meta["description"]))
         from rich.text import Text
-        tree = Tree(f"[bold {COLOR}]HTTP[/bold {COLOR}]")
+        tree = Tree(f"[bold {COLOR}]HTTPS[/bold {COLOR}]")
         for fam in sorted(families):
             branch = tree.add(f"[bold {COLOR}]{fam}[/bold {COLOR}]")
             for name, desc in sorted(families[fam]):
@@ -143,7 +143,7 @@ class HTTPSScriptShell:
         console.print()
         console.print(Panel(
             f"[bold white]FAMILIA: {family.upper()}[/bold white]"
-            f"  [dim]— módulo [bold {COLOR}]HTTP[/bold {COLOR}][/dim]\n\n"
+            f"  [dim]— módulo [bold {COLOR}]HTTPS[/bold {COLOR}][/dim]\n\n"
             + "\n".join(f"  • {s}" for s in sorted(scripts_in_fam)),
             title=f"[bold {COLOR}]FAMILIA CARGADA[/bold {COLOR}]",
             border_style=COLOR, expand=False))
@@ -206,7 +206,7 @@ class HTTPSScriptShell:
         console.print()
         console.print(Panel(
             f"[bold white]{name.upper()}[/bold white]"
-            f"  [dim]— [bold {COLOR}]HTTP[/bold {COLOR}] / {fam}[/dim]\n\n{meta['description']}",
+            f"  [dim]— [bold {COLOR}]HTTPS[/bold {COLOR}] / {fam}[/dim]\n\n{meta['description']}",
             title=f"[bold {COLOR}]SCRIPT CARGADO[/bold {COLOR}]",
             border_style=COLOR, expand=False))
         req  = meta.get("required",[]); opt = meta.get("optional",[]); defs = meta.get("defaults",{})

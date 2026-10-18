@@ -91,7 +91,7 @@ def _smbexec(ip, conn, command, timeout=30):
     smb_out  = f"Windows\\Temp\\{os.path.basename(tmp_out)}"
 
     try:
-        dce = _dce_connect(ip, conn, "\\\\svcctl")
+        dce = _dce_connect(ip, conn, r"\svcctl")
         dce.bind(scmr.MSRPC_UUID_SCMR)
 
         scm = scmr.hROpenSCManagerW(dce)["lpScHandle"]
@@ -180,7 +180,7 @@ def _atexec(ip, conn, command, timeout=30):
 </Task>"""
 
     try:
-        dce = _dce_connect(ip, conn, "\\\\atsvc")
+        dce = _dce_connect(ip, conn, r"\atsvc")
         dce.bind(tsch.MSRPC_UUID_TSCHS)
 
         # Registrar tarea

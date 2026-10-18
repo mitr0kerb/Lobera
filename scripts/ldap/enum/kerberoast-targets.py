@@ -13,7 +13,7 @@ except ImportError:
 class Script(BaseScript):
     name        = "kerberoast-targets"
     protocol    = "ldap"
-    category    = "attack"
+    category    = "enum"
     description = (
         "Enumera via LDAP cuentas de usuario (no máquina) con SPN registrado: "
         "candidatos a Kerberoasting. Muestra SPN, cuenta y cuándo se usó por última vez."

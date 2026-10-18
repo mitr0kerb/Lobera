@@ -323,8 +323,8 @@ class GoldenTicketScript(BaseScript):
             validation_info['GroupIds'] = []
             for gid in groups:
                 group = GROUP_MEMBERSHIP()
-                group['RelativeId'] = gid
-                group['Attributes'] = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED
+                group.RelativeId = gid
+                group.Attributes = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED
                 validation_info['GroupIds'].append(group)
             validation_info['UserFlags'] = 0
             validation_info['UserSessionKey'] = b'\x00' * 16

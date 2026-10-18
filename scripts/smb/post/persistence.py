@@ -17,6 +17,7 @@ Uso:
   python lobera.py smb -t 10.10.10.5 --script=persistence -u USER -p PASS --method startup --local-file shell.exe
 """
 
+from scripts.base import BaseScript
 from core.output import console
 from core import session_db
 
@@ -211,26 +212,24 @@ def _service(target, user, password, domain, lm_hash, nt_hash,
 
 # ── Script principal ───────────────────────────────────────────────────────────
 
-class Script:
-    NAME        = "persistence"
-    DESCRIPTION = "Persistencia remota: schtask, registro, WMI, startup, servicio"
+class Script(BaseScript):
+    name        = "persistence"
+    protocol    = "smb"
+    category    = "post"
+    description = "Persistencia remota: schtask, registro, WMI, startup, servicio"
 
-    def __init__(self, target, creds):
-        self.target = target
-        self.creds  = creds
-
-    def run(self, args):
+    def run(self, **kwargs):
         target   = str(self.target.ip)
-        user     = getattr(args, 'username', None) or (self.creds.username if self.creds else None)
-        password = getattr(args, 'password', '') or (self.creds.password if self.creds else '')
-        domain   = getattr(args, 'domain',   '') or (self.creds.domain   if self.creds else '')
-        hash_    = getattr(args, 'hash',     None)
-        method   = getattr(args, 'method',   'schtask') or 'schtask'
-        payload  = getattr(args, 'exec',     None)
-        name     = getattr(args, 'persist_name', 'WindowsUpdate')
-        hive     = getattr(args, 'hive',     'HKLM')
-        trigger  = getattr(args, 'trigger',  'logon')
-        local_file = getattr(args, 'local_file', None)
+        user     = self.creds.user or kwargs.get('user')
+        password = self.creds.password or kwargs.get('password', '')
+        domain   = self.creds.domain or kwargs.get('domain', '')
+        hash_    = self.creds.hash or kwargs.get('hash')
+        method   = kwargs.get('method', 'schtask') or 'schtask'
+        payload  = kwargs.get('exec')
+        name     = kwargs.get('persist_name', 'WindowsUpdate')
+        hive     = kwargs.get('hive', 'HKLM')
+        trigger  = kwargs.get('trigger', 'logon')
+        local_file = kwargs.get('local_file')
 
         if not user:
             console.print("[red]Falta -u USER[/red]")
@@ -282,14 +281,9 @@ class Script:
             return
 
         if success:
-            session_db.save_finding(
-                category="persistence",
-                data={
-                    "target":  target,
-                    "method":  method,
-                    "name":    name,
-                    "payload": payload or local_file,
-                }
+            session_db.DB.SaveFinding(
+                target, "SMB", "persistence",
+                f"method={method} name={name} payload={payload or local_file}"
             )
             console.print(f"\n  [bold green]✓ Persistencia establecida[/bold green]")
         else:
