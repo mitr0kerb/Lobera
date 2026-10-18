@@ -2,12 +2,13 @@
 
 from scripts.base import BaseScript
 from modules.smb import SMBModule
-from core import spray_guard
 from core.output import console
 
 
 class PasswordSprayScript(BaseScript):
     name = "password-spray"
+    protocol = "smb"
+    category = "attack"
     description = "Prueba una misma contraseña o hash contra una lista de usuarios (--userlist)"
 
     examples = [
@@ -46,21 +47,16 @@ class PasswordSprayScript(BaseScript):
             console.print("[red]Falta -p o -H: password-spray necesita una credencial que probar.[/red]")
             return
 
-        # ── Verificar política de lockout antes de empezar ────────────────────
-        policy = spray_guard.check_lockout_policy(self.target, self.creds)
-        if not spray_guard.warn_if_risky(policy, requested_delay=delay,
-                                          continue_on_lockout=continue_on_lockout):
-            return
-
-        # Si no se especificó delay, usar el recomendado automáticamente
+        # ── Advertencia de seguridad sobre lockout ────────────────────────────
         if delay == 0.0:
-            rec = spray_guard.safe_delay(policy)
-            if rec > 0:
-                delay = rec
-                console.print(f"  [dim]delay automático aplicado: {delay:.0f}s[/dim]")
-            elif rec == -1:
-                if not continue_on_lockout:
-                    return   # warn_if_risky ya lo habrá abortado, pero por seguridad
+            console.print(
+                "  [yellow]⚠ Sin --delay especificado. Usa --delay <segundos> para evitar bloqueos de cuenta.[/yellow]"
+            )
+            if not continue_on_lockout:
+                console.print(
+                    "  [yellow]  Usa --continue-on-lockout para suprimir este aviso y continuar igualmente.[/yellow]"
+                )
+                return
 
         smb = SMBModule(self.target, self.creds)
         if not smb.connect():
