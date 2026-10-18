@@ -141,13 +141,23 @@ def _mostrar_ayuda_principal():
     console.print("""
 [bold]Comandos disponibles:[/bold]
 
-  [cyan]use <módulo>[/cyan]     — Entra en la consola del módulo (smb, kerberos, rpc...)
-  [cyan]modules[/cyan]          — Lista los módulos disponibles
-  [cyan]clear / cls[/cyan]      — Limpia la pantalla
-  [cyan]help[/cyan]             — Muestra esta ayuda
-  [cyan]exit / quit[/cyan]      — Sale de Lobera
-  [dim]Ctrl+L[/dim]             — Limpia la pantalla
-  [dim]Ctrl+C[/dim]             — Sale de Lobera
+  [cyan]use <módulo>[/cyan]          — Entra en la consola del módulo (smb, kerberos, rpc...)
+  [cyan]modules[/cyan]               — Lista los módulos disponibles
+  [cyan]set <var> <valor>[/cyan]     — Establece una variable de sesión (compartida entre módulos)
+  [cyan]show[/cyan] / [cyan]options[/cyan]           — Muestra las variables actuales
+  [cyan]clear / cls[/cyan]           — Limpia la pantalla
+  [cyan]help[/cyan]                  — Muestra esta ayuda
+  [cyan]exit / quit[/cyan]           — Sale de Lobera
+  [dim]Ctrl+L[/dim]                  — Limpia la pantalla
+
+[bold]Variables de sesión:[/bold]
+  [yellow]target[/yellow]   IP u hostname del objetivo  [dim](ej: set target 10.10.10.5)[/dim]
+  [yellow]user[/yellow]     Usuario                    [dim](ej: set user Administrator)[/dim]
+  [yellow]password[/yellow] Contraseña                 [dim](ej: set password P@ss1234)[/dim]
+  [yellow]hash[/yellow]     Hash NT (Pass-the-Hash)    [dim](ej: set hash aad3b...:31d6c...)[/dim]
+  [yellow]domain[/yellow]   Dominio FQDN               [dim](ej: set domain CORP.LOCAL)[/dim]
+  [yellow]port[/yellow]     Puerto del servicio        [dim](ej: set port 445)[/dim]
+  [yellow]timeout[/yellow]  Timeout en segundos        [dim](ej: set timeout 10)[/dim]
 """)
 
 
@@ -158,13 +168,209 @@ def _mostrar_ayuda_modulo(modulo: str):
     console.print(f"""
 [bold]Comandos en el módulo [{color}]{modulo}[/{color}]:[/bold]
 
-  [cyan]list scripts[/cyan]   — Lista los scripts disponibles con descripción
-  [cyan]clear / cls[/cyan]    — Limpia la pantalla
-  [cyan]back[/cyan]           — Vuelve al prompt principal
-  [cyan]help[/cyan]           — Muestra esta ayuda
-  [cyan]exit / quit[/cyan]    — Sale de Lobera
-  [dim]Ctrl+L[/dim]           — Limpia la pantalla
+  [cyan]use <script>[/cyan]         — Ejecuta un script del módulo
+  [cyan]list scripts[/cyan]         — Lista los scripts disponibles con descripción
+  [cyan]set <var> <valor>[/cyan]    — Establece una variable de sesión
+  [cyan]show[/cyan] / [cyan]options[/cyan]         — Muestra las variables actuales
+  [cyan]clear / cls[/cyan]          — Limpia la pantalla
+  [cyan]back[/cyan]                 — Vuelve al prompt principal
+  [cyan]help[/cyan]                 — Muestra esta ayuda
+  [cyan]exit / quit[/cyan]          — Sale de Lobera
+  [dim]Ctrl+L[/dim]                 — Limpia la pantalla
+
+[bold]Variables disponibles:[/bold]
+  [yellow]target[/yellow]   IP u hostname del objetivo
+  [yellow]user[/yellow]     Usuario
+  [yellow]password[/yellow] Contraseña
+  [yellow]hash[/yellow]     Hash NT (Pass-the-Hash)
+  [yellow]domain[/yellow]   Dominio (CORP.LOCAL)
+  [yellow]port[/yellow]     Puerto del servicio
+  [yellow]timeout[/yellow]  Timeout en segundos
 """)
+
+
+# ── Sesión compartida entre módulos ──────────────────────────────────────────
+
+# Variables globales de sesión — se comparten entre todos los módulos
+_SESION: dict = {
+    "target":   None,   # IP/hostname del objetivo
+    "user":     None,   # usuario
+    "password": None,   # contraseña
+    "hash":     None,   # hash NT
+    "domain":   None,   # dominio
+    "port":     None,   # puerto (sobreescribe el default del script)
+    "timeout":  None,   # timeout en segundos
+}
+
+# Alias admitidos para cada clave (lo que puede escribir el usuario)
+_SET_ALIAS = {
+    "target":   ("target", "t", "ip", "host"),
+    "user":     ("user",   "u", "usuario"),
+    "password": ("password", "pass", "p", "passwd", "contraseña"),
+    "hash":     ("hash",   "h", "ntlm"),
+    "domain":   ("domain", "d", "dominio"),
+    "port":     ("port",   "puerto"),
+    "timeout":  ("timeout",),
+}
+
+# Mapa inverso: alias → clave canónica
+_ALIAS_INVERSO: dict = {}
+for _clave, _alias_lista in _SET_ALIAS.items():
+    for _a in _alias_lista:
+        _ALIAS_INVERSO[_a] = _clave
+
+
+def _set_sesion(clave_raw: str, valor: str):
+    """Asigna un valor a la sesión global. Acepta alias."""
+    clave = _ALIAS_INVERSO.get(clave_raw.lower())
+    if not clave:
+        console.print(f"[red]Variable desconocida: '{clave_raw}'[/red]")
+        console.print(f"[dim]Variables: {', '.join(_SESION.keys())}[/dim]")
+        return
+    if valor.lower() in ("none", "null", "unset", ""):
+        _SESION[clave] = None
+        console.print(f"  [dim]{clave} => (unset)[/dim]")
+    else:
+        _SESION[clave] = valor
+        console.print(f"  [green]{clave}[/green] => [bold]{valor}[/bold]")
+
+
+def _mostrar_opciones():
+    """Muestra las variables de sesión actuales como tabla."""
+    from rich.table import Table
+    from rich import box
+
+    t = Table(
+        box=box.SIMPLE, show_header=True, padding=(0, 2), show_edge=False,
+        header_style="bold white",
+    )
+    t.add_column("Variable",  style="bold yellow", no_wrap=True, min_width=12)
+    t.add_column("Valor",     style="bold green",  no_wrap=True, min_width=20)
+    t.add_column("Descripción", style="dim")
+
+    descripciones = {
+        "target":   "IP o hostname del objetivo",
+        "user":     "Usuario (SMB, LDAP, WinRM...)",
+        "password": "Contraseña",
+        "hash":     "Hash NT para Pass-the-Hash (LM:NT o solo NT)",
+        "domain":   "Dominio FQDN (ej: CORP.LOCAL)",
+        "port":     "Puerto del servicio (sobreescribe el default)",
+        "timeout":  "Timeout en segundos (default: 5)",
+    }
+
+    for clave, valor in _SESION.items():
+        val_str = str(valor) if valor is not None else "[dim](no definido)[/dim]"
+        t.add_row(clave, val_str, descripciones.get(clave, ""))
+
+    console.print()
+    console.print(t)
+    console.print()
+
+
+def _cargar_script_clase(modulo: str, nombre_script: str):
+    """
+    Busca y devuelve la clase del script <nombre_script> dentro de
+    scripts/<modulo>/**/<nombre_script>.py.
+    Devuelve (clase, ruta) o (None, None) si no se encuentra.
+    """
+    import importlib.util
+
+    scripts_dir = _ROOT / "scripts" / modulo
+    if not scripts_dir.exists():
+        return None, None
+
+    # Buscar el fichero en todas las subcarpetas
+    for fichero in scripts_dir.rglob("*.py"):
+        if fichero.name.startswith("_"):
+            continue
+        if fichero.stem == nombre_script or fichero.stem == nombre_script.replace("-", "_"):
+            # Cargar el módulo
+            spec = importlib.util.spec_from_file_location(
+                f"scripts.{modulo}.{fichero.stem}", fichero
+            )
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+            except Exception as e:
+                console.print(f"[red]Error cargando {fichero.name}: {e}[/red]")
+                return None, None
+
+            # Buscar la clase Script o cualquier subclase de BaseScript con ese nombre
+            from scripts.base import BaseScript
+            for attr in dir(mod):
+                cls = getattr(mod, attr)
+                try:
+                    if (isinstance(cls, type)
+                            and issubclass(cls, BaseScript)
+                            and cls is not BaseScript
+                            and cls.name is not None):
+                        return cls, fichero
+                except TypeError:
+                    continue
+            return None, None
+
+    return None, None
+
+
+def _ejecutar_script(modulo: str, nombre_script: str):
+    """
+    Ejecuta el script <nombre_script> del módulo usando la sesión global.
+    Si falta el target, lo pide interactivamente.
+    """
+    from core.target import Target
+    from core.credentials import Credentials
+
+    cls, ruta = _cargar_script_clase(modulo, nombre_script)
+    if cls is None:
+        console.print(f"[red]Script no encontrado: '{nombre_script}' en módulo '{modulo}'[/red]")
+        console.print(f"[dim]Usa 'list scripts' para ver los disponibles.[/dim]")
+        return
+
+    # Si no hay target en la sesión, pedirlo ahora
+    if not _SESION["target"]:
+        console.print(f"[yellow]El script '{nombre_script}' necesita un objetivo.[/yellow]")
+        try:
+            val = _leer_input("  [bold]target[/bold] (IP/hostname): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Cancelado.[/dim]")
+            return
+        if not val:
+            console.print("[red]Sin objetivo. Usa 'set target <IP>' primero.[/red]")
+            return
+        _SESION["target"] = val
+
+    # Construir Target y Credentials desde la sesión
+    timeout = int(_SESION["timeout"]) if _SESION["timeout"] else 5
+    port    = int(_SESION["port"])    if _SESION["port"]    else None
+
+    target = Target(
+        ip=_SESION["target"],
+        domain=_SESION["domain"] or None,
+        timeout=timeout,
+    )
+    # Port como atributo extra (algunos módulos lo leen)
+    if port:
+        target.port = port
+
+    creds = Credentials(
+        user    =_SESION["user"]     or "",
+        password=_SESION["password"] or "",
+        domain  =_SESION["domain"]   or "",
+        hash    =_SESION["hash"]     or None,
+    )
+
+    color = _PROTO_COLORS.get(modulo, "white")
+    console.print(f"\n[dim]Ejecutando [{color}]{nombre_script}[/{color}] contra {_SESION['target']}...[/dim]\n")
+
+    script_obj = cls(target=target, creds=creds)
+    try:
+        script_obj.run()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrumpido.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error ejecutando el script: {e}[/red]")
+
+    console.print()
 
 
 # ── Consola del módulo ────────────────────────────────────────────────────────
@@ -172,7 +378,6 @@ def _mostrar_ayuda_modulo(modulo: str):
 def _consola_modulo(modulo: str):
     """Bucle interactivo dentro de un módulo concreto."""
     color = _PROTO_COLORS.get(modulo, "white")
-    prompt_modulo = f"lobera [{color}]{modulo}[/{color}]"
 
     console.print(f"\n[dim]Entrando en módulo [{color}]{modulo}[/{color}]. Escribe 'help' para ver comandos.[/dim]\n")
 
@@ -186,9 +391,10 @@ def _consola_modulo(modulo: str):
         if not linea:
             continue
 
-        partes = linea.split(maxsplit=1)
-        cmd = partes[0].lower()
-        resto = partes[1].strip() if len(partes) > 1 else ""
+        partes = linea.split(maxsplit=2)
+        cmd  = partes[0].lower()
+        arg1 = partes[1].strip() if len(partes) > 1 else ""
+        arg2 = partes[2].strip() if len(partes) > 2 else ""
 
         if cmd in ("exit", "quit"):
             console.print("[dim]Saliendo de Lobera...[/dim]")
@@ -203,11 +409,34 @@ def _consola_modulo(modulo: str):
         elif cmd == "help":
             _mostrar_ayuda_modulo(modulo)
 
-        elif cmd == "list" and resto == "scripts":
+        elif cmd == "list" and arg1 == "scripts":
             _mostrar_scripts_modulo(modulo)
 
         elif cmd == "list":
             console.print(f"[yellow]¿Quizás quisiste decir 'list scripts'?[/yellow]")
+
+        elif cmd == "set":
+            if not arg1:
+                console.print("[red]Uso: set <variable> <valor>[/red]")
+                console.print(f"[dim]Ejemplo: set target 10.10.10.5[/dim]")
+            elif not arg2:
+                console.print(f"[red]Uso: set {arg1} <valor>[/red]")
+            else:
+                _set_sesion(arg1, arg2)
+
+        elif cmd in ("show", "options", "info"):
+            _mostrar_opciones()
+
+        elif cmd == "use":
+            if not arg1:
+                console.print("[red]Uso: use <script>[/red]")
+                console.print(f"[dim]Usa 'list scripts' para ver los disponibles.[/dim]")
+            else:
+                _ejecutar_script(modulo, arg1)
+
+        elif cmd == "run":
+            # run sin argumentos: re-ejecuta el último use o pide un script
+            console.print(f"[yellow]Usa 'use <script>' para ejecutar un script.[/yellow]")
 
         else:
             console.print(f"[red]Comando desconocido: {cmd}[/red]  (escribe 'help' para ver comandos)")
@@ -346,6 +575,21 @@ def _consola_principal():
                 console.print(f"[dim]Módulos disponibles: {', '.join(_MODULOS)}[/dim]")
                 continue
             _consola_modulo(modulo)
+
+        elif cmd == "set":
+            partes_set = linea.split(maxsplit=2)
+            arg1_set = partes_set[1].strip() if len(partes_set) > 1 else ""
+            arg2_set = partes_set[2].strip() if len(partes_set) > 2 else ""
+            if not arg1_set:
+                console.print("[red]Uso: set <variable> <valor>[/red]")
+                console.print("[dim]Ejemplo: set target 10.10.10.5[/dim]")
+            elif not arg2_set:
+                console.print(f"[red]Uso: set {arg1_set} <valor>[/red]")
+            else:
+                _set_sesion(arg1_set, arg2_set)
+
+        elif cmd in ("show", "options", "info"):
+            _mostrar_opciones()
 
         else:
             console.print(f"[red]Comando desconocido: {cmd}[/red]  (escribe 'help' para ver comandos)")
