@@ -379,6 +379,9 @@ def _consola_modulo(modulo: str):
     """Bucle interactivo dentro de un módulo concreto."""
     color = _PROTO_COLORS.get(modulo, "white")
 
+    # Activar contexto de completado para este módulo
+    _COMPLETADO_CONTEXTO["modulo"] = modulo
+
     console.print(f"\n[dim]Entrando en módulo [{color}]{modulo}[/{color}]. Escribe 'help' para ver comandos.[/dim]\n")
 
     while True:
@@ -401,6 +404,7 @@ def _consola_modulo(modulo: str):
             sys.exit(0)
 
         elif cmd == "back":
+            _COMPLETADO_CONTEXTO["modulo"] = None  # Volver a contexto principal
             break
 
         elif cmd in ("clear", "cls"):
@@ -500,18 +504,109 @@ def _ansi_para_readline(texto_ansi: str) -> str:
     return re.sub(r'(\x1b\[[0-9;]*[mK])', r'\001\1\002', texto_ansi)
 
 
+# ── Autocompletado con readline ───────────────────────────────────────────────
+
+# Contexto de completado actual — lo establece la consola antes de llamar a _leer_input
+_COMPLETADO_CONTEXTO: dict = {
+    "modulo": None,   # None → consola principal; str → módulo activo
+}
+
+# Comandos raíz por contexto
+_CMDS_PRINCIPAL = [
+    "use ", "set ", "show", "options", "modules", "help", "clear", "cls", "exit", "quit",
+]
+_CMDS_MODULO = [
+    "use ", "set ", "show", "options", "list scripts", "back", "help", "clear", "cls", "exit", "quit",
+]
+
+# Variables de sesión y sus alias para completar "set <Tab>"
+_VARS_SESION = list(_SESION.keys())  # target, user, password, hash, domain, port, timeout
+
+
+def _obtener_scripts_modulo_flat(modulo: str) -> list:
+    """Devuelve lista plana de nombres de scripts de un módulo (para autocompletado)."""
+    if not modulo:
+        return []
+    scripts_dir = _ROOT / "scripts" / modulo
+    if not scripts_dir.exists():
+        return []
+    nombres = []
+    for fichero in sorted(scripts_dir.rglob("*.py")):
+        if not fichero.name.startswith("_"):
+            nombres.append(fichero.stem.replace("_", "-"))
+    return nombres
+
+
+def _completer(texto: str, estado: int):
+    """
+    Función de completado para readline.
+    Completa según el contexto: comandos, módulos, scripts o variables.
+    """
+    try:
+        import readline
+        linea_completa = readline.get_line_buffer()
+        partes = linea_completa.lstrip().split()
+
+        modulo = _COMPLETADO_CONTEXTO.get("modulo")
+
+        # ── Sin palabras aún o primera palabra ────────────────────────────────
+        cmds = _CMDS_MODULO if modulo else _CMDS_PRINCIPAL
+        if len(partes) == 0 or (len(partes) == 1 and not linea_completa.endswith(" ")):
+            candidatos = [c for c in cmds if c.startswith(texto)]
+            return candidatos[estado] if estado < len(candidatos) else None
+
+        primer_cmd = partes[0].lower()
+
+        # ── use <Tab> ─────────────────────────────────────────────────────────
+        if primer_cmd == "use":
+            if modulo:
+                # Dentro de módulo: completar nombre de script
+                scripts = _obtener_scripts_modulo_flat(modulo)
+                candidatos = [s for s in scripts if s.startswith(texto)]
+            else:
+                # Consola principal: completar módulo
+                candidatos = [m for m in _MODULOS if m.startswith(texto)]
+            return candidatos[estado] if estado < len(candidatos) else None
+
+        # ── set <Tab> ─────────────────────────────────────────────────────────
+        if primer_cmd == "set":
+            if len(partes) == 1 or (len(partes) == 2 and not linea_completa.endswith(" ")):
+                # Completar nombre de variable
+                candidatos = [v for v in _VARS_SESION if v.startswith(texto)]
+                return candidatos[estado] if estado < len(candidatos) else None
+            # No completamos el valor (puede ser cualquier cosa)
+            return None
+
+        # ── list <Tab> ────────────────────────────────────────────────────────
+        if primer_cmd == "list":
+            candidatos = [c for c in ["scripts"] if c.startswith(texto)]
+            return candidatos[estado] if estado < len(candidatos) else None
+
+    except Exception:
+        pass
+    return None
+
+
+def _activar_autocompletado():
+    """Registra el completer y configura readline para el autocompletado."""
+    try:
+        import readline
+        readline.set_completer(_completer)
+        readline.set_completer_delims(" \t")   # Solo espacio como delimitador
+        readline.parse_and_bind("tab: complete")
+        readline.parse_and_bind(r'"\C-l": clear-screen')
+    except ImportError:
+        pass
+
+
 def _leer_input(prompt_rich: str) -> str:
     """
     Lee una línea de input con readline.
     - Convierte markup Rich → ANSI → envuelto en \\001\\002
     - Ctrl+L limpia la pantalla y redibuja el prompt correctamente
-    - Historial de comandos dentro de la sesión
+    - Tab autocompleta comandos, módulos, scripts y variables
     """
-    try:
-        import readline
-        readline.parse_and_bind(r'"\C-l": clear-screen')
-    except ImportError:
-        pass
+    _activar_autocompletado()
 
     prompt_ansi = _rich_a_ansi(prompt_rich)
     prompt_rl   = _ansi_para_readline(prompt_ansi)
@@ -526,6 +621,9 @@ def _leer_input(prompt_rich: str) -> str:
 
 def _consola_principal():
     """Bucle principal de la consola interactiva estilo Metasploit."""
+
+    # Asegurar contexto de completado en modo principal
+    _COMPLETADO_CONTEXTO["modulo"] = None
 
     # Mensaje informativo sobre binarios directos
     bins_str = "  ".join(_BINS_DISPONIBLES)
