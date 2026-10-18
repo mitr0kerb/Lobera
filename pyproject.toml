@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lobera"
-version = "1.0.0"
+version = "0.2.0"
 description = "Suite de herramientas para pentesting de Active Directory"
 authors = [{ name = "mitr0kerb", email = "mitr0kerb@gmail.com" }]
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-lobera         = "lobera:main"
+lobera         = "lobera_pkg:main"
 lobera-server  = "tools.server.main:main"
 lobera-watch   = "tools.watch.main:main"
 lobera-spray   = "tools.spray.main:main"
@@ -30,7 +30,7 @@ lobera-check   = "tools.check.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "modules*", "scripts*", "tools*"]
+include = ["lobera_pkg*", "core*", "modules*", "scripts*", "tools*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.txt"]
