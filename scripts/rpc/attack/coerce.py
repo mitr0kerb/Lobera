@@ -118,9 +118,6 @@ class Script(BaseScript):
             return False
 
         try:
-            from impacket.dcerpc.v5 import transport
-            from impacket.uuid import uuidtup_to_bin
-
             # MS-EFSRPC UUID
             EFSRPC_UUID  = ("c681d488-d850-11d0-8c52-00c04fd90f7e", "1.0")
             EFSRPC_UUID2 = ("df1941c5-fe89-4e79-bf10-463657acf44d", "1.0")
