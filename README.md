@@ -50,6 +50,30 @@ pip install -e .
 
 ---
 
+---
+
+## Screenshots
+
+### Main Interface
+![Lobera](assets/screenshots/main.png)
+
+### SMB Modules
+![SMB Modules](assets/screenshots/smb-modules.png)
+
+### Interactive Shell
+![Interactive Shell](assets/screenshots/interactive-cli.png)
+
+### Vulnerability Assessment
+![Lobera Check](assets/screenshots/check.png)
+
+### Hash Auditing
+![Lobera Crack](assets/screenshots/crack.png)
+
+## Lobera Individual Tools
+![Lobera Tools](assets/screenshots/tools.png)
+
+---
+
 ## Uso rápido
 
 ```bash
